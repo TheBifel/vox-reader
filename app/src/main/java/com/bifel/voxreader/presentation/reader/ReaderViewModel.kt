@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.bifel.voxreader.domain.analysis.CharacterAnalysisRequest
 import com.bifel.voxreader.domain.analysis.CharacterAnalyzer
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
@@ -19,11 +20,14 @@ import com.bifel.voxreader.domain.text.SentenceSegmenter
 import com.bifel.voxreader.domain.usecase.ImportBookUseCase
 import com.bifel.voxreader.domain.usecase.LoadLatestBookUseCase
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 class ReaderViewModel(
     private val importBook: ImportBookUseCase,
@@ -39,9 +43,11 @@ class ReaderViewModel(
 
     private var initialized = false
     private var storedBook: StoredBook? = null
-    private var analysisPreparedForBookId: String? = null
+    private val analyzedPhraseRanges = mutableListOf<IntRange>()
     private var currentUtteranceId: String? = null
     private var preparationJob: Job? = null
+    private var analysisLookAheadJob: Job? = null
+    private val analysisMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -145,13 +151,20 @@ class ReaderViewModel(
         val book = mutableUiState.value.book ?: return
         val safeStart = start.coerceIn(0, book.text.length)
         val safeEnd = end.coerceIn(safeStart, book.text.length)
-        if (userInitiated && mutableUiState.value.playbackState == PlaybackState.PLAYING) {
-            pause()
+        if (userInitiated) {
+            if (mutableUiState.value.playbackState == PlaybackState.PLAYING ||
+                mutableUiState.value.playbackState == PlaybackState.PREPARING
+            ) {
+                pause()
+            }
         }
         mutableUiState.update {
             it.copy(
                 pageStart = safeStart,
                 pageEnd = safeEnd,
+                activePhraseIndex = if (userInitiated) null else it.activePhraseIndex,
+                highlightStart = if (userInitiated) null else it.highlightStart,
+                highlightEnd = if (userInitiated) null else it.highlightEnd,
             )
         }
         viewModelScope.launch {
@@ -183,7 +196,7 @@ class ReaderViewModel(
         stored: StoredBook,
     ) {
         storedBook = stored
-        analysisPreparedForBookId = null
+        analyzedPhraseRanges.clear()
         val phrases = SentenceSegmenter.segment(document.text)
         val restoredPosition = stored.readingPosition.coerceIn(0, document.text.length)
         mutableUiState.update { current ->
@@ -209,42 +222,20 @@ class ReaderViewModel(
 
     private fun prepareAndPlay() {
         val state = mutableUiState.value
-        val book = state.book ?: return
+        state.book ?: return
         if (state.phrases.isEmpty()) return
 
-        preparationJob?.cancel()
-        mutableUiState.update { it.copy(playbackState = PlaybackState.PREPARING) }
-        preparationJob = viewModelScope.launch {
-            runCatching {
-                if (analysisPreparedForBookId != book.id) {
-                    val analysis = characterAnalyzer.analyze(
-                        text = book.text,
-                        knownCharacters = storedBook?.characters.orEmpty(),
-                    )
-                    analysisPreparedForBookId = book.id
-                    storedBook = storedBook?.copy(characters = analysis.characters)
-                    mutableUiState.update {
-                        it.copy(
-                            phrases = analysis.phrases,
-                            characters = analysis.characters,
-                        )
-                    }
-                    libraryRepository.updateCharacters(book.id, analysis.characters)
-                }
-                speechEngine.awaitReady()
-            }.onSuccess {
-                val latest = mutableUiState.value
-                val index = latest.activePhraseIndex
-                    ?.coerceIn(latest.phrases.indices)
-                    ?: firstVisiblePhraseIndex(latest)
-                speakPhrase(index)
-            }.onFailure(::speechFailure)
-        }
+        val index = state.activePhraseIndex
+            ?.coerceIn(state.phrases.indices)
+            ?: firstVisiblePhraseIndex(state)
+        preparePhraseAndPlay(index)
     }
 
     private fun pause() {
         preparationJob?.cancel()
         preparationJob = null
+        analysisLookAheadJob?.cancel()
+        analysisLookAheadJob = null
         currentUtteranceId = null
         speechEngine.stop()
         mutableUiState.update {
@@ -264,6 +255,8 @@ class ReaderViewModel(
         val wasPlaying = state.playbackState == PlaybackState.PLAYING ||
             state.playbackState == PlaybackState.PREPARING
         preparationJob?.cancel()
+        analysisLookAheadJob?.cancel()
+        analysisLookAheadJob = null
         currentUtteranceId = null
         speechEngine.stop()
 
@@ -279,11 +272,24 @@ class ReaderViewModel(
             )
         }
         if (wasPlaying) {
-            viewModelScope.launch {
-                runCatching { speechEngine.awaitReady() }
-                    .onSuccess { speakPhrase(target) }
-                    .onFailure(::speechFailure)
-            }
+            preparePhraseAndPlay(target)
+        }
+    }
+
+    private fun preparePhraseAndPlay(index: Int) {
+        val state = mutableUiState.value
+        val book = state.book ?: return
+        if (index !in state.phrases.indices) return
+
+        preparationJob?.cancel()
+        mutableUiState.update { it.copy(playbackState = PlaybackState.PREPARING) }
+        preparationJob = viewModelScope.launch {
+            runCatching {
+                ensurePhraseAnalyzed(book, index)
+                speechEngine.awaitReady()
+            }.onSuccess {
+                speakPhrase(index)
+            }.onFailure(::handlePreparationFailure)
         }
     }
 
@@ -295,6 +301,11 @@ class ReaderViewModel(
         }
         val profile = state.characters.firstOrNull { it.id == phrase.speakerId }
             ?: NarratorProfile
+        Log.d(
+            TAG,
+            "Speaking phrase ${phrase.index} [${phrase.start},${phrase.end}) as " +
+                "${profile.displayName} (${profile.voiceGroup})",
+        )
         val utteranceId = "${state.book?.id}:${phrase.index}:${System.nanoTime()}"
         currentUtteranceId = utteranceId
         mutableUiState.update {
@@ -310,10 +321,12 @@ class ReaderViewModel(
                 utteranceId = utteranceId,
                 text = phrase.text,
                 voiceSlot = profile.voiceSlot,
+                voiceGroup = profile.voiceGroup,
                 pitch = profile.pitch,
                 speechRate = profile.speechRate,
             ),
         )
+        startAnalysisLookAhead(index + 1)
     }
 
     private fun handleSpeechEvent(event: SpeechEvent) {
@@ -340,7 +353,12 @@ class ReaderViewModel(
                 if (state.playbackState == PlaybackState.PLAYING &&
                     currentIndex < state.phrases.lastIndex
                 ) {
-                    speakPhrase(currentIndex + 1)
+                    val nextIndex = currentIndex + 1
+                    if (isPhraseAnalyzed(nextIndex)) {
+                        speakPhrase(nextIndex)
+                    } else {
+                        preparePhraseAndPlay(nextIndex)
+                    }
                 } else {
                     mutableUiState.update { it.copy(playbackState = PlaybackState.PAUSED) }
                 }
@@ -363,6 +381,104 @@ class ReaderViewModel(
     private fun activePhrase(): SpeechPhrase? =
         mutableUiState.value.activePhraseIndex?.let(mutableUiState.value.phrases::getOrNull)
 
+    private fun isPhraseAnalyzed(index: Int): Boolean =
+        analyzedPhraseRanges.any { index in it }
+
+    private suspend fun ensurePhraseAnalyzed(
+        book: BookDocument,
+        index: Int,
+    ) {
+        if (isPhraseAnalyzed(index)) return
+        analysisMutex.withLock {
+            if (isPhraseAnalyzed(index)) return@withLock
+            val latest = mutableUiState.value
+            val phrase = latest.phrases.getOrNull(index)
+                ?: error("The requested sentence is no longer available.")
+            val analysis = characterAnalyzer.analyze(
+                CharacterAnalysisRequest(
+                    text = book.text,
+                    knownCharacters = storedBook?.characters.orEmpty(),
+                    existingPhrases = latest.phrases,
+                    focusPosition = phrase.start,
+                    preservedPhraseRanges = analyzedPhraseRanges.toList(),
+                ),
+            )
+            val resolvedPhrase = analysis.phrases.getOrNull(index)
+            val resolvedProfile = analysis.characters.firstOrNull {
+                it.id == resolvedPhrase?.speakerId
+            } ?: NarratorProfile
+            Log.d(
+                TAG,
+                "Attributed phrase $index [${resolvedPhrase?.start},${resolvedPhrase?.end}) as " +
+                    "${resolvedProfile.displayName} " +
+                    "(${resolvedProfile.voiceGroup}) using ${analysis.source}",
+            )
+            analysis.analyzedPhraseRange?.let(::rememberAnalyzedRange)
+            storedBook = storedBook?.copy(characters = analysis.characters)
+            mutableUiState.update {
+                it.copy(
+                    phrases = analysis.phrases,
+                    characters = analysis.characters,
+                    lastAnalysisSource = analysis.source,
+                )
+            }
+            libraryRepository.updateCharacters(book.id, analysis.characters)
+        }
+    }
+
+    /**
+     * Character attribution is intentionally pipelined with speech. While Android TTS reads
+     * the current sentence, TinyBERT resolves a short window ahead in the background.
+     */
+    private fun startAnalysisLookAhead(fromIndex: Int) {
+        if (analysisLookAheadJob?.isActive == true) return
+        val book = mutableUiState.value.book ?: return
+        val lastIndex = mutableUiState.value.phrases.lastIndex
+        if (fromIndex !in 0..lastIndex) return
+        val windowEnd = (fromIndex + ANALYSIS_LOOK_AHEAD_PHRASES - 1)
+            .coerceAtMost(lastIndex)
+
+        analysisLookAheadJob = viewModelScope.launch {
+            runCatching {
+                while (mutableUiState.value.playbackState == PlaybackState.PLAYING ||
+                    mutableUiState.value.playbackState == PlaybackState.PREPARING
+                ) {
+                    val nextUnresolved = (fromIndex..windowEnd)
+                        .firstOrNull { !isPhraseAnalyzed(it) }
+                        ?: break
+                    ensurePhraseAnalyzed(book, nextUnresolved)
+                }
+            }.onFailure { error ->
+                if (error !is CancellationException) {
+                    Log.w(TAG, "Character look-ahead stopped; playback will retry on demand", error)
+                }
+            }
+        }
+    }
+
+    private fun rememberAnalyzedRange(newRange: IntRange) {
+        if (newRange.isEmpty()) return
+        val allRanges = buildList {
+            addAll(analyzedPhraseRanges)
+            add(newRange)
+        }.sortedBy { it.first }
+        analyzedPhraseRanges.clear()
+        allRanges.forEach { range ->
+            val previous = analyzedPhraseRanges.lastOrNull()
+            if (previous != null && range.first <= previous.last + 1) {
+                analyzedPhraseRanges[analyzedPhraseRanges.lastIndex] =
+                    previous.first..maxOf(previous.last, range.last)
+            } else {
+                analyzedPhraseRanges.add(range)
+            }
+        }
+    }
+
+    private fun handlePreparationFailure(error: Throwable) {
+        if (error is CancellationException) return
+        speechFailure(error)
+    }
+
     private fun speechFailure(error: Throwable) {
         Log.e(TAG, "Speech playback failed", error)
         currentUtteranceId = null
@@ -378,6 +494,8 @@ class ReaderViewModel(
     private fun stopPlayback(clearSelection: Boolean) {
         preparationJob?.cancel()
         preparationJob = null
+        analysisLookAheadJob?.cancel()
+        analysisLookAheadJob = null
         currentUtteranceId = null
         speechEngine.stop()
         mutableUiState.update {
@@ -411,6 +529,7 @@ class ReaderViewModel(
 
     private companion object {
         const val TAG = "VoxReader"
+        const val ANALYSIS_LOOK_AHEAD_PHRASES = 6
     }
 
     class Factory(

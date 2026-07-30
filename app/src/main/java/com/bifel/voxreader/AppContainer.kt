@@ -1,7 +1,9 @@
 package com.bifel.voxreader
 
 import android.app.Application
+import com.bifel.voxreader.data.analysis.OnnxTinyBertSpeakerScorer
 import com.bifel.voxreader.data.analysis.RuleBasedCharacterAnalyzer
+import com.bifel.voxreader.data.analysis.TinyBertCharacterAnalyzer
 import com.bifel.voxreader.data.epub.EpubParser
 import com.bifel.voxreader.data.epub.LocalBookRepository
 import com.bifel.voxreader.data.preferences.ReaderDataStoreRepository
@@ -15,9 +17,12 @@ class AppContainer(application: Application) {
 
     val libraryRepository = dataStoreRepository
     val settingsRepository = dataStoreRepository
-    val characterAnalyzer = RuleBasedCharacterAnalyzer()
+    private val speakerScorer = OnnxTinyBertSpeakerScorer(application)
+    val characterAnalyzer = TinyBertCharacterAnalyzer(
+        fallback = RuleBasedCharacterAnalyzer(),
+        scorer = speakerScorer,
+    )
     val speechEngine = AndroidSpeechEngine(application)
     val importBook = ImportBookUseCase(bookRepository, libraryRepository)
     val loadLatestBook = LoadLatestBookUseCase(bookRepository, libraryRepository)
 }
-

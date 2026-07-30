@@ -1,5 +1,6 @@
 package com.bifel.voxreader.presentation.reader
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -26,11 +27,11 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
@@ -69,6 +70,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.bifel.voxreader.domain.model.BookDocument
+import com.bifel.voxreader.domain.model.CharacterAnalysisSource
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.presentation.theme.ReaderHighlight
 import kotlinx.coroutines.launch
@@ -91,9 +93,13 @@ fun ReaderScreen(
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
+    BackHandler(enabled = drawerState.isOpen) {
+        scope.launch { drawerState.close() }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = state.chromeVisible,
+        gesturesEnabled = true,
         drawerContent = {
             ReaderDrawer(
                 state = state,
@@ -102,7 +108,10 @@ fun ReaderScreen(
                     onEnableSpeech()
                     scope.launch { drawerState.close() }
                 },
-                onDisableSpeech = onDisableSpeech,
+                onDisableSpeech = {
+                    onDisableSpeech()
+                    scope.launch { drawerState.close() }
+                },
             )
         },
     ) {
@@ -203,6 +212,25 @@ private fun ReaderDrawer(
                 },
                 modifier = Modifier.clickable {
                     if (state.speechControlsEnabled) onDisableSpeech() else onEnableSpeech()
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+            ListItem(
+                headlineContent = { Text("TinyBERT dialogue classifier") },
+                supportingContent = {
+                    val source = if (
+                        state.lastAnalysisSource == CharacterAnalysisSource.TINY_BERT
+                    ) {
+                        "TinyBERT"
+                    } else {
+                        "dialogue rules"
+                    }
+                    Text(
+                        "Bundled and fully offline. Last speaker decision used $source.",
+                    )
+                },
+                leadingContent = {
+                    Icon(Icons.Default.Psychology, contentDescription = null)
                 },
             )
         }
@@ -349,20 +377,6 @@ private fun PaginatedBookPage(
 
         Row(Modifier.fillMaxSize()) {
             InvisibleTapZone(
-                label = "Next page",
-                onClick = {
-                    if (page.end < book.text.length) {
-                        showPage(forward(page.end), userInitiated = true)
-                    }
-                },
-                modifier = Modifier.weight(1f),
-            )
-            InvisibleTapZone(
-                label = "Show or hide reader menu",
-                onClick = onToggleChrome,
-                modifier = Modifier.weight(1f),
-            )
-            InvisibleTapZone(
                 label = "Previous page",
                 onClick = {
                     if (page.start > 0) {
@@ -378,6 +392,20 @@ private fun PaginatedBookPage(
                             ),
                             userInitiated = true,
                         )
+                    }
+                },
+                modifier = Modifier.weight(1f),
+            )
+            InvisibleTapZone(
+                label = "Show or hide reader menu",
+                onClick = onToggleChrome,
+                modifier = Modifier.weight(1f),
+            )
+            InvisibleTapZone(
+                label = "Next page",
+                onClick = {
+                    if (page.end < book.text.length) {
+                        showPage(forward(page.end), userInitiated = true)
                     }
                 },
                 modifier = Modifier.weight(1f),

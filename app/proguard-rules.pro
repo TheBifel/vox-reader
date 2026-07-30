@@ -1,2 +1,2 @@
-# No project-specific rules are required for the proof of concept.
-
+# ONNX Runtime uses Java reflection to bind its native inference values.
+-keep class ai.onnxruntime.** { *; }

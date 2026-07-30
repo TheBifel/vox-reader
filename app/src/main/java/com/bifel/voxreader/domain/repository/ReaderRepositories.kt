@@ -28,4 +28,3 @@ interface SettingsRepository {
     suspend fun setDarkTheme(enabled: Boolean)
     suspend fun setSpeechControlsEnabled(enabled: Boolean)
 }
-

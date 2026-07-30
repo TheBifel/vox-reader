@@ -9,3 +9,6 @@
 *.log
 /device-*.png
 /device-*.xml
+/local-diagnostics/
+__pycache__/
+*.pyc

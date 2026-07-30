@@ -1,7 +1,9 @@
 package com.bifel.voxreader.data.analysis
 
 import com.bifel.voxreader.domain.analysis.CharacterAnalyzer
+import com.bifel.voxreader.domain.analysis.CharacterAnalysisRequest
 import com.bifel.voxreader.domain.model.CharacterAnalysis
+import com.bifel.voxreader.domain.model.CharacterAnalysisSource
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.NarratorProfile
@@ -12,63 +14,229 @@ import java.util.Locale
 
 class RuleBasedCharacterAnalyzer : CharacterAnalyzer {
 
-    override suspend fun analyze(
-        text: String,
-        knownCharacters: List<CharacterProfile>,
-    ): CharacterAnalysis {
+    override suspend fun analyze(request: CharacterAnalysisRequest): CharacterAnalysis {
+        val text = request.text
         val characters = linkedMapOf<String, CharacterProfile>()
         characters[NARRATOR_ID] = NarratorProfile
-        knownCharacters.forEach { characters[it.id] = it }
+        request.knownCharacters.forEach { characters[it.id] = it }
+        if (request.existingPhrases.isNotEmpty()) {
+            return analyzeFocused(request, characters)
+        }
 
         val recentSpeakers = ArrayDeque<String>()
+        var openDialogueSpeaker: String? = null
         val attributed = SentenceSegmenter.segment(text).map { phrase ->
-            if (!phrase.containsDialogue()) {
-                return@map phrase.copy(speakerId = NARRATOR_ID)
+            val speaker = openDialogueSpeaker ?: if (!phrase.isDialogueIn(text)) {
+                NARRATOR_ID
+            } else {
+                val context = text.paragraphContextAround(phrase)
+                val namedSpeaker = findNamedSpeakerAround(text, phrase)
+                when {
+                    namedSpeaker != null -> {
+                        val profile = findOrCreateCharacter(
+                            candidate = namedSpeaker,
+                            characters = characters,
+                        )
+                        rememberSpeaker(recentSpeakers, profile.id)
+                        profile.id
+                    }
+
+                    containsMaleAttribution(context) ->
+                        recentSpeakers.firstOrNull {
+                            characters[it]?.voiceGroup == VoiceGroup.MALE
+                        }
+
+                    containsFemaleAttribution(context) ->
+                        recentSpeakers.firstOrNull {
+                            characters[it]?.voiceGroup == VoiceGroup.FEMALE
+                        }
+
+                    else -> alternatingSpeaker(recentSpeakers)
+                } ?: NARRATOR_ID
             }
 
-            val before = text.substring(
-                (phrase.start - CONTEXT_RADIUS).coerceAtLeast(0),
-                phrase.start,
-            )
-            val after = text.substring(
-                phrase.end,
-                (phrase.end + CONTEXT_RADIUS).coerceAtMost(text.length),
-            )
-            val context = "$before ${phrase.text} $after"
-            val namedSpeaker = findNamedSpeaker(phrase.text)
-                ?: findNamedSpeaker(after)
-                ?: findNamedSpeaker(before)
-            val speaker = when {
-                namedSpeaker != null -> {
-                    val profile = findOrCreateCharacter(
-                        candidate = namedSpeaker,
-                        context = context,
-                        characters = characters,
-                    )
-                    rememberSpeaker(recentSpeakers, profile.id)
-                    profile.id
-                }
-
-                containsMaleAttribution(context) ->
-                    recentSpeakers.firstOrNull {
-                        characters[it]?.voiceGroup == VoiceGroup.MALE
-                    }
-
-                containsFemaleAttribution(context) ->
-                    recentSpeakers.firstOrNull {
-                        characters[it]?.voiceGroup == VoiceGroup.FEMALE
-                    }
-
-                else -> alternatingSpeaker(recentSpeakers)
-            } ?: NARRATOR_ID
-
+            openDialogueSpeaker = if (text.isInsideDialogueAt(phrase.end)) speaker else null
             phrase.copy(speakerId = speaker)
         }
 
         return CharacterAnalysis(
             phrases = attributed.reindex(),
             characters = characters.values.toList(),
+            analyzedPhraseRange = attributed.indices,
+            source = CharacterAnalysisSource.RULES,
         )
+    }
+
+    private fun analyzeFocused(
+        request: CharacterAnalysisRequest,
+        characters: MutableMap<String, CharacterProfile>,
+    ): CharacterAnalysis {
+        val phrases = request.existingPhrases.toMutableList()
+        val focusIndex = phrases
+            .indexOfFirst { it.end > request.focusPosition }
+            .takeIf { it >= 0 }
+            ?: phrases.lastIndex
+        val phrase = phrases[focusIndex]
+        val previousPhrase = phrases.getOrNull(focusIndex - 1)
+        val previousSpeaker = previousPhrase
+            ?.speakerId
+            ?.takeIf { it != NARRATOR_ID }
+        val recentSpeakers = ArrayDeque<String>()
+        phrases
+            .subList((focusIndex - RECENT_SPEAKER_PHRASES).coerceAtLeast(0), focusIndex)
+            .asReversed()
+            .map(SpeechPhrase::speakerId)
+            .filter { it != NARRATOR_ID }
+            .distinct()
+            .forEach(recentSpeakers::addLast)
+        val precedingTagSpeaker = previousPhrase
+            ?.takeIf {
+                phrase.isDialogueIn(request.text) &&
+                    request.text.substring(it.end, phrase.start).isBlank()
+            }
+            ?.let { tag ->
+                findNamedSpeaker(tag.text)
+                    ?.let { findOrCreateCharacter(it, characters).id }
+                    ?: when {
+                        containsMaleAttribution(tag.text) ->
+                            recentSpeakers.firstOrNull {
+                                characters[it]?.voiceGroup == VoiceGroup.MALE
+                            }
+
+                        containsFemaleAttribution(tag.text) ->
+                            recentSpeakers.firstOrNull {
+                                characters[it]?.voiceGroup == VoiceGroup.FEMALE
+                            }
+
+                        else -> null
+                    }
+            }
+
+        val speaker = when {
+            previousSpeaker != null &&
+                phrase.isDialogueIn(request.text) &&
+                (
+                    request.text.isInsideDialogueAt(phrase.start) ||
+                        (
+                            request.text.isSameParagraph(previousPhrase.end, phrase.start) &&
+                                findNamedSpeaker(phrase.text) == null
+                            ) ||
+                        (
+                            previousPhrase.containsDialogue() &&
+                                findNamedSpeaker(previousPhrase.text) != null &&
+                                request.text.substring(previousPhrase.end, phrase.start).isBlank() &&
+                                findNamedSpeaker(phrase.text) == null
+                            )
+                    ) ->
+                previousSpeaker
+
+            precedingTagSpeaker != null && findNamedSpeaker(phrase.text) == null ->
+                precedingTagSpeaker
+
+            !phrase.isDialogueIn(request.text) -> NARRATOR_ID
+            else -> attributeDialogue(
+                text = request.text,
+                phrase = phrase,
+                previousPhrase = previousPhrase,
+                characters = characters,
+                recentSpeakers = recentSpeakers,
+            )
+        }
+        phrases[focusIndex] = phrase.copy(speakerId = speaker)
+        return CharacterAnalysis(
+            phrases = phrases,
+            characters = characters.values.toList(),
+            analyzedPhraseRange = focusIndex..focusIndex,
+            source = CharacterAnalysisSource.RULES,
+        )
+    }
+
+    private fun attributeDialogue(
+        text: String,
+        phrase: SpeechPhrase,
+        previousPhrase: SpeechPhrase?,
+        characters: MutableMap<String, CharacterProfile>,
+        recentSpeakers: ArrayDeque<String>,
+    ): String {
+        val context = text.paragraphContextAround(phrase)
+        val namedSpeaker = findNamedSpeakerAround(text, phrase)
+        return when {
+            namedSpeaker != null -> findOrCreateCharacter(
+                candidate = namedSpeaker,
+                characters = characters,
+            ).also { rememberSpeaker(recentSpeakers, it.id) }.id
+
+            containsMaleAttribution(context) ->
+                recentSpeakers.firstOrNull {
+                    characters[it]?.voiceGroup == VoiceGroup.MALE
+                }
+
+            containsFemaleAttribution(context) ->
+                recentSpeakers.firstOrNull {
+                    characters[it]?.voiceGroup == VoiceGroup.FEMALE
+                }
+
+            previousPhrase != null ->
+                actionBeatSpeaker(
+                    text = text,
+                    phrase = phrase,
+                    previousPhrase = previousPhrase,
+                    characters = characters,
+                    recentSpeakers = recentSpeakers,
+                ) ?: alternatingSpeaker(recentSpeakers)
+
+            else -> alternatingSpeaker(recentSpeakers)
+        } ?: NARRATOR_ID
+    }
+
+    private fun actionBeatSpeaker(
+        text: String,
+        phrase: SpeechPhrase,
+        previousPhrase: SpeechPhrase,
+        characters: Map<String, CharacterProfile>,
+        recentSpeakers: ArrayDeque<String>,
+    ): String? {
+        if (previousPhrase.isDialogueIn(text) ||
+            !text.isSameParagraph(previousPhrase.end, phrase.start)
+        ) {
+            return null
+        }
+        if (silentListenerAction.containsMatchIn(previousPhrase.text)) {
+            return recentSpeakers.firstOrNull()
+        }
+
+        characters.values
+            .asSequence()
+            .filterNot { it.id == NARRATOR_ID }
+            .flatMap { profile ->
+                profile.aliases
+                    .plus(profile.displayName)
+                    .asSequence()
+                    .mapNotNull { alias ->
+                        previousPhrase.text.lastNameIndex(alias)
+                            .takeIf { it >= 0 }
+                            ?.let { index -> profile to index }
+                    }
+            }
+            .maxByOrNull { it.second }
+            ?.first
+            ?.let { return it.id }
+
+        val pronoun = subjectPronoun.findAll(previousPhrase.text).lastOrNull()?.value
+            ?: return null
+        val group = if (pronoun.equals("he", ignoreCase = true)) {
+            VoiceGroup.MALE
+        } else {
+            VoiceGroup.FEMALE
+        }
+        return recentSpeakers.firstOrNull { characters[it]?.voiceGroup == group }
+    }
+
+    private fun String.lastNameIndex(name: String): Int {
+        if (name.length < 2) return -1
+        return Regex(
+            """(?i)(?<![\p{L}\p{N}])${Regex.escape(name)}(?![\p{L}\p{N}])""",
+        ).findAll(this).lastOrNull()?.range?.first ?: -1
     }
 
     private fun findNamedSpeaker(context: String): String? {
@@ -81,9 +249,31 @@ class RuleBasedCharacterAnalyzer : CharacterAnalyzer {
         return null
     }
 
+    private fun findNamedSpeakerAround(
+        text: String,
+        phrase: SpeechPhrase,
+    ): String? {
+        findNamedSpeaker(phrase.text)?.let { return it }
+        val paragraphStart = text.lastIndexOf(
+            "\n\n",
+            (phrase.start - 1).coerceAtLeast(0),
+        ).let { if (it < 0) 0 else it + 2 }
+        val paragraphEnd = text.indexOf("\n\n", phrase.end.coerceAtMost(text.length))
+            .let { if (it < 0) text.length else it }
+        val after = text.substring(
+            phrase.end,
+            minOf(paragraphEnd, phrase.end + CONTEXT_RADIUS),
+        )
+        findNamedSpeaker(after)?.let { return it }
+        val before = text.substring(
+            maxOf(paragraphStart, phrase.start - CONTEXT_RADIUS),
+            phrase.start,
+        )
+        return findNamedSpeaker(before)
+    }
+
     private fun findOrCreateCharacter(
         candidate: String,
-        context: String,
         characters: MutableMap<String, CharacterProfile>,
     ): CharacterProfile {
         val normalizedCandidate = normalizeName(candidate)
@@ -92,7 +282,7 @@ class RuleBasedCharacterAnalyzer : CharacterAnalyzer {
                 normalizeName(profile.displayName) == normalizedCandidate
         }?.let { return it }
 
-        val voiceGroup = inferVoiceGroup(candidate, context)
+        val voiceGroup = inferVoiceGroup(candidate)
         val groupCount = characters.values.count { it.voiceGroup == voiceGroup }
         val voiceSlot = when (voiceGroup) {
             VoiceGroup.NARRATOR -> 0
@@ -119,19 +309,17 @@ class RuleBasedCharacterAnalyzer : CharacterAnalyzer {
         ).also { characters[id] = it }
     }
 
-    private fun inferVoiceGroup(name: String, context: String): VoiceGroup {
+    private fun inferVoiceGroup(name: String): VoiceGroup {
         val normalized = name.lowercase(Locale.ROOT)
         return when {
             normalized.startsWith("mr ") ||
                 normalized.startsWith("sir ") ||
-                normalized.startsWith("lord ") ||
-                malePronoun.containsMatchIn(context) -> VoiceGroup.MALE
+                normalized.startsWith("lord ") -> VoiceGroup.MALE
 
             normalized.startsWith("mrs ") ||
                 normalized.startsWith("ms ") ||
                 normalized.startsWith("miss ") ||
-                normalized.startsWith("lady ") ||
-                femalePronoun.containsMatchIn(context) -> VoiceGroup.FEMALE
+                normalized.startsWith("lady ") -> VoiceGroup.FEMALE
 
             else -> VoiceGroup.NEUTRAL
         }
@@ -166,11 +354,46 @@ class RuleBasedCharacterAnalyzer : CharacterAnalyzer {
     private fun SpeechPhrase.containsDialogue(): Boolean =
         text.any { it in dialogueMarks }
 
+    private fun SpeechPhrase.isDialogueIn(bookText: String): Boolean =
+        containsDialogue() || bookText.isInsideDialogueAt(start)
+
+    private fun String.isInsideDialogueAt(position: Int): Boolean {
+        val safePosition = position.coerceIn(0, length)
+        val paragraphStart = lastIndexOf("\n\n", (safePosition - 1).coerceAtLeast(0))
+            .let { if (it < 0) 0 else it + 2 }
+        val paragraphPrefix = substring(paragraphStart, safePosition)
+        val straightOpen = paragraphPrefix.count { it == '"' } % 2 == 1
+        val curlyOpen = paragraphPrefix.count { it == '\u201c' } >
+            paragraphPrefix.count { it == '\u201d' }
+        val guillemetOpen = paragraphPrefix.count { it == '\u00ab' } >
+            paragraphPrefix.count { it == '\u00bb' }
+        return straightOpen || curlyOpen || guillemetOpen
+    }
+
+    private fun String.isSameParagraph(
+        previousEnd: Int,
+        currentStart: Int,
+    ): Boolean {
+        if (previousEnd !in 0..length || currentStart !in previousEnd..length) return false
+        return "\n\n" !in substring(previousEnd, currentStart)
+    }
+
+    private fun String.paragraphContextAround(phrase: SpeechPhrase): String {
+        val paragraphStart = lastIndexOf("\n\n", (phrase.start - 1).coerceAtLeast(0))
+            .let { if (it < 0) 0 else it + 2 }
+        val paragraphEnd = indexOf("\n\n", phrase.end.coerceAtMost(length))
+            .let { if (it < 0) length else it }
+        val contextStart = maxOf(paragraphStart, phrase.start - CONTEXT_RADIUS)
+        val contextEnd = minOf(paragraphEnd, phrase.end + CONTEXT_RADIUS)
+        return substring(contextStart, contextEnd)
+    }
+
     private fun List<SpeechPhrase>.reindex(): List<SpeechPhrase> =
         mapIndexed { index, phrase -> phrase.copy(index = index) }
 
     private companion object {
         const val CONTEXT_RADIUS = 110
+        const val RECENT_SPEAKER_PHRASES = 12
 
         val dialogueMarks = setOf('"', '“', '”', '„', '«', '»')
         val speechVerbs =
@@ -179,12 +402,15 @@ class RuleBasedCharacterAnalyzer : CharacterAnalyzer {
             """(?<name>(?:(?:Mr|Mrs|Ms|Miss|Sir|Lady|Lord|Dr)\.?\s+)?[\p{Lu}][\p{L}'-]+(?:\s+[\p{Lu}][\p{L}'-]+)?)"""
 
         val attributionPatterns = listOf(
-            Regex("""\b$namePattern\s+(?:$speechVerbs)\b""", RegexOption.IGNORE_CASE),
-            Regex("""\b(?:$speechVerbs)\s+$namePattern\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b$namePattern\s+(?i:$speechVerbs)\b"""),
+            Regex("""\b(?i:$speechVerbs)\s+$namePattern\b"""),
         )
 
-        val malePronoun = Regex("""\b(?:he|him|his)\b""", RegexOption.IGNORE_CASE)
-        val femalePronoun = Regex("""\b(?:she|her|hers)\b""", RegexOption.IGNORE_CASE)
+        val subjectPronoun = Regex("""\b(?:he|she)\b""", RegexOption.IGNORE_CASE)
+        val silentListenerAction = Regex(
+            """\b(?:shook\s+(?:his|her|their)\s+head|nodded|shrugged)\b""",
+            RegexOption.IGNORE_CASE,
+        )
         val maleAttribution =
             Regex("""\b(?:he|him)\s+(?:$speechVerbs)\b|\b(?:$speechVerbs)\s+he\b""", RegexOption.IGNORE_CASE)
         val femaleAttribution =

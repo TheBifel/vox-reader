@@ -5,6 +5,9 @@ import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
+import android.util.Log
+import com.bifel.voxreader.BuildConfig
+import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.speech.SpeechEngine
 import com.bifel.voxreader.domain.speech.SpeechEvent
 import com.bifel.voxreader.domain.speech.SpeechRequest
@@ -26,6 +29,8 @@ class AndroidSpeechEngine(
 
     private val initialization = MutableStateFlow<Initialization>(Initialization.Starting)
     private var offlineVoices: List<Voice> = emptyList()
+    private var maleVoices: List<Voice> = emptyList()
+    private var femaleVoices: List<Voice> = emptyList()
     private lateinit var textToSpeech: TextToSpeech
 
     init {
@@ -61,10 +66,23 @@ class AndroidSpeechEngine(
             return
         }
 
-        if (offlineVoices.isNotEmpty()) {
-            textToSpeech.voice = offlineVoices[
-                Math.floorMod(request.voiceSlot, offlineVoices.size)
-            ]
+        val voicePool = when (request.voiceGroup) {
+            VoiceGroup.MALE -> maleVoices
+            VoiceGroup.FEMALE -> femaleVoices
+            VoiceGroup.NARRATOR,
+            VoiceGroup.NEUTRAL,
+            -> offlineVoices
+        }.ifEmpty { offlineVoices }
+        if (voicePool.isNotEmpty()) {
+            val selectedVoice = voicePool[Math.floorMod(request.voiceSlot, voicePool.size)]
+            textToSpeech.voice = selectedVoice
+            if (BuildConfig.DEBUG) {
+                Log.d(
+                    TAG,
+                    "Using ${request.voiceGroup} voice ${selectedVoice.name}; " +
+                        "pitch=${request.pitch}; rate=${request.speechRate}",
+                )
+            }
         }
         textToSpeech.setPitch(request.pitch.coerceIn(0.5f, 1.6f))
         textToSpeech.setSpeechRate(request.speechRate.coerceIn(0.6f, 1.5f))
@@ -103,16 +121,36 @@ class AndroidSpeechEngine(
         val available = textToSpeech.voices
             .orEmpty()
             .filterNot(Voice::isNetworkConnectionRequired)
-        val deviceLanguage = Locale.getDefault().language
+            .filterNot { "notInstalled" in it.features }
+            .filter { it.locale.language == Locale.ENGLISH.language }
+            .filterNot { it.name.endsWith("-language") }
         offlineVoices = available
             .sortedWith(
                 compareBy<Voice>(
-                    { it.locale.language != deviceLanguage },
-                    { it.locale.language != Locale.ENGLISH.language },
+                    { it.locale.country != Locale.getDefault().country },
+                    { it.locale.country != Locale.US.country },
                     { -it.quality },
                     { it.name },
                 ),
             )
+        maleVoices = offlineVoices.filter { voice ->
+            maleVoiceMarkers.any(voice.name::contains)
+        }
+        femaleVoices = offlineVoices.filter { voice ->
+            femaleVoiceMarkers.any(voice.name::contains)
+        }
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TAG,
+                offlineVoices.mapIndexed { index, voice ->
+                    "$index: ${voice.name}; locale=${voice.locale}"
+                }.joinToString(
+                    prefix = "Usable English voices (${maleVoices.size} male, " +
+                        "${femaleVoices.size} female):\n",
+                    separator = "\n",
+                ),
+            )
+        }
     }
 
     private val progressListener = object : UtteranceProgressListener() {
@@ -169,5 +207,31 @@ class AndroidSpeechEngine(
         data object Ready : Initialization
         data class Failed(val message: String) : Initialization
     }
-}
 
+    private companion object {
+        const val TAG = "VoxReaderTTS"
+        val maleVoiceMarkers = listOf(
+            "x-aub-",
+            "x-aud-",
+            "x-gbb-",
+            "x-gbd-",
+            "x-enc-",
+            "x-ene-",
+            "x-iob-",
+            "x-iol-",
+            "x-iom-",
+        )
+        val femaleVoiceMarkers = listOf(
+            "x-aua-",
+            "x-auc-",
+            "x-gba-",
+            "x-gbc-",
+            "x-ena-",
+            "x-end-",
+            "x-iog-",
+            "x-sfg-",
+            "x-tpc-",
+            "x-tpf-",
+        )
+    }
+}

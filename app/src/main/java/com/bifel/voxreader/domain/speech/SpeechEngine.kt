@@ -1,11 +1,13 @@
 package com.bifel.voxreader.domain.speech
 
+import com.bifel.voxreader.domain.model.VoiceGroup
 import kotlinx.coroutines.flow.SharedFlow
 
 data class SpeechRequest(
     val utteranceId: String,
     val text: String,
     val voiceSlot: Int,
+    val voiceGroup: VoiceGroup,
     val pitch: Float,
     val speechRate: Float,
 )
@@ -31,4 +33,3 @@ interface SpeechEngine {
     fun speak(request: SpeechRequest)
     fun stop()
 }
-

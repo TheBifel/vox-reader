@@ -2,10 +2,17 @@
 
 VoxReader is an offline-first Android EPUB reader that reads books aloud while assigning stable
 voice variations to recurring characters. The proof of concept is built with Kotlin, Jetpack
-Compose, MVVM, DataStore, and Android's local text-to-speech service.
+Compose, MVVM, DataStore, a bundled quantized TinyBERT speaker classifier, and Android's local
+text-to-speech service.
 
 See [Product and solution overview](docs/PRODUCT_AND_SOLUTION.md) for the product goal, user flow,
 architecture, processing pipeline, current limitations, and implementation roadmap.
+
+See [Whole-book pre-analysis implementation plan](docs/BOOK_PREANALYSIS_IMPLEMENTATION_PLAN.md)
+for the future overnight on-phone and opt-in paid cloud cache paths.
+
+See [TinyBERT speaker classifier](docs/TINYBERT_SPEAKER_CLASSIFIER.md) for the model boundary,
+training/export process, validation results, thresholds, and known limitations.
 
 ## Open in Android Studio
 
@@ -17,4 +24,3 @@ architecture, processing pipeline, current limitations, and implementation roadm
 
 The app intentionally has no file picker in this POC. A new book enters the library only through
 Android's **Open with** flow.
-
