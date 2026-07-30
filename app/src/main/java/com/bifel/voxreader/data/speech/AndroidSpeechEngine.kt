@@ -22,19 +22,22 @@ class AndroidSpeechEngine(
     context: Context,
 ) : SpeechEngine {
 
+    private val applicationContext = context.applicationContext
     private val mutableEvents = MutableSharedFlow<SpeechEvent>(
         extraBufferCapacity = 64,
     )
     override val events: SharedFlow<SpeechEvent> = mutableEvents.asSharedFlow()
 
-    private val initialization = MutableStateFlow<Initialization>(Initialization.Starting)
+    private val initialization = MutableStateFlow<Initialization>(Initialization.NotStarted)
     private var offlineVoices: List<Voice> = emptyList()
     private var maleVoices: List<Voice> = emptyList()
     private var femaleVoices: List<Voice> = emptyList()
     private lateinit var textToSpeech: TextToSpeech
 
-    init {
-        textToSpeech = TextToSpeech(context.applicationContext) { status ->
+    private fun ensureStarted() {
+        if (initialization.value != Initialization.NotStarted) return
+        initialization.value = Initialization.Starting
+        textToSpeech = TextToSpeech(applicationContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 configureEngine()
                 initialization.value = Initialization.Ready
@@ -48,10 +51,17 @@ class AndroidSpeechEngine(
     }
 
     override suspend fun awaitReady() {
-        when (val state = initialization.first { it !is Initialization.Starting }) {
+        ensureStarted()
+        when (
+            val state = initialization.first {
+                it !is Initialization.Starting && it !is Initialization.NotStarted
+            }
+        ) {
             Initialization.Ready -> Unit
             is Initialization.Failed -> error(state.message)
-            Initialization.Starting -> error("Unexpected speech initialization state.")
+            Initialization.Starting,
+            Initialization.NotStarted,
+            -> error("Unexpected speech initialization state.")
         }
     }
 
@@ -203,6 +213,7 @@ class AndroidSpeechEngine(
     }
 
     private sealed interface Initialization {
+        data object NotStarted : Initialization
         data object Starting : Initialization
         data object Ready : Initialization
         data class Failed(val message: String) : Initialization

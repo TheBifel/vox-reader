@@ -21,14 +21,18 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
+import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.AlertDialog
@@ -65,12 +69,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterAnalysisSource
+import com.bifel.voxreader.domain.model.NARRATOR_ID
+import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.presentation.theme.ReaderHighlight
 import kotlinx.coroutines.launch
@@ -88,6 +93,8 @@ fun ReaderScreen(
     onPreviousPhrase: () -> Unit,
     onNextPhrase: () -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
+    onExportAnalysis: () -> Unit,
+    onImportAnalysis: () -> Unit,
     onDismissError: () -> Unit,
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
@@ -110,6 +117,14 @@ fun ReaderScreen(
                 },
                 onDisableSpeech = {
                     onDisableSpeech()
+                    scope.launch { drawerState.close() }
+                },
+                onExportAnalysis = {
+                    onExportAnalysis()
+                    scope.launch { drawerState.close() }
+                },
+                onImportAnalysis = {
+                    onImportAnalysis()
                     scope.launch { drawerState.close() }
                 },
             )
@@ -153,11 +168,14 @@ private fun ReaderDrawer(
     onToggleTheme: () -> Unit,
     onEnableSpeech: () -> Unit,
     onDisableSpeech: () -> Unit,
+    onExportAnalysis: () -> Unit,
+    onImportAnalysis: () -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
             modifier = Modifier
                 .fillMaxHeight()
+                .verticalScroll(rememberScrollState())
                 .padding(top = 28.dp),
         ) {
             Text(
@@ -233,6 +251,88 @@ private fun ReaderDrawer(
                     Icon(Icons.Default.Psychology, contentDescription = null)
                 },
             )
+            HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            ListItem(
+                headlineContent = { Text("Export speaker analysis TSV") },
+                supportingContent = {
+                    Text("Creates the portable whole-book file for cloud, desktop, or manual editing.")
+                },
+                leadingContent = {
+                    Icon(Icons.Default.SaveAlt, contentDescription = null)
+                },
+                modifier = Modifier.clickable(onClick = onExportAnalysis),
+            )
+            ListItem(
+                headlineContent = { Text("Import speaker analysis TSV") },
+                supportingContent = {
+                    Text("Validates and caches assignments for the currently open book.")
+                },
+                leadingContent = {
+                    Icon(Icons.Default.FileOpen, contentDescription = null)
+                },
+                modifier = Modifier.clickable(onClick = onImportAnalysis),
+            )
+            state.cachedAttributionProvider?.let { provider ->
+                Text(
+                    text = "Cached analysis: $provider · " +
+                        formatCoverage(state.cachedAttributionCoverage),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                )
+                CachedSpeakerLegend(state)
+            }
+            state.analysisMessage?.let { message ->
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun CachedSpeakerLegend(state: ReaderUiState) {
+    val cachedSpeakerIds = state.phrases
+        .asSequence()
+        .filter { it.index in state.cachedSpeakerPhraseIndices }
+        .map(SpeechPhrase::speakerId)
+        .filter { it != NARRATOR_ID && it != UNKNOWN_SPEAKER_ID }
+        .toSet()
+    val speakers = state.characters
+        .filter { it.id in cachedSpeakerIds }
+        .take(MAX_LEGEND_SPEAKERS)
+    if (speakers.isEmpty()) return
+
+    Text(
+        text = "Speaker colors",
+        style = MaterialTheme.typography.labelMedium,
+        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+    )
+    speakers.forEach { character ->
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+        ) {
+            Box(
+                Modifier
+                    .size(18.dp)
+                    .background(
+                        speakerHighlightColor(
+                            speakerId = character.id,
+                            darkTheme = state.darkTheme,
+                        ),
+                    ),
+            )
+            Text(
+                text = character.displayName,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 10.dp),
+            )
         }
     }
 }
@@ -259,6 +359,8 @@ private fun ReaderContent(
                 requestedPageStart = state.pageStart,
                 highlightStart = state.highlightStart,
                 highlightEnd = state.highlightEnd,
+                cachedSpeakerPhraseIndices = state.cachedSpeakerPhraseIndices,
+                darkTheme = state.darkTheme,
                 onToggleChrome = onToggleChrome,
                 onPageChanged = onPageChanged,
                 modifier = Modifier.weight(1f),
@@ -309,6 +411,8 @@ private fun PaginatedBookPage(
     requestedPageStart: Int,
     highlightStart: Int?,
     highlightEnd: Int?,
+    cachedSpeakerPhraseIndices: Set<Int>,
+    darkTheme: Boolean,
     onToggleChrome: () -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
     modifier: Modifier = Modifier,
@@ -366,6 +470,9 @@ private fun PaginatedBookPage(
                 text = highlightedPage(
                     text = book.text,
                     page = page,
+                    phrases = phrases,
+                    cachedSpeakerPhraseIndices = cachedSpeakerPhraseIndices,
+                    darkTheme = darkTheme,
                     highlightStart = highlightStart,
                     highlightEnd = highlightEnd,
                 ),
@@ -437,28 +544,93 @@ private fun InvisibleTapZone(
 private fun highlightedPage(
     text: String,
     page: PageLayout,
+    phrases: List<SpeechPhrase>,
+    cachedSpeakerPhraseIndices: Set<Int>,
+    darkTheme: Boolean,
     highlightStart: Int?,
     highlightEnd: Int?,
 ): AnnotatedString = buildAnnotatedString {
     val pageText = text.substring(page.start, page.end)
+    append(pageText)
+
+    val phrasesByIndex = phrases.associateBy(SpeechPhrase::index)
+    phrases.asSequence()
+        .filter { phrase ->
+            phrase.index in cachedSpeakerPhraseIndices &&
+                phrase.speakerId != NARRATOR_ID &&
+                phrase.speakerId != UNKNOWN_SPEAKER_ID &&
+                phrase.end > page.start &&
+                phrase.start < page.end
+        }
+        .forEach { phrase ->
+            val phraseStart = phrase.start.coerceIn(page.start, page.end) - page.start
+            val nextPhrase = phrasesByIndex[phrase.index + 1]
+            val absoluteEnd = if (
+                nextPhrase != null &&
+                nextPhrase.index in cachedSpeakerPhraseIndices &&
+                nextPhrase.speakerId == phrase.speakerId
+            ) {
+                nextPhrase.start
+            } else {
+                phrase.end
+            }
+            val phraseEnd = absoluteEnd.coerceIn(page.start, page.end) - page.start
+            if (phraseEnd > phraseStart) {
+                addStyle(
+                    style = SpanStyle(
+                        background = speakerHighlightColor(phrase.speakerId, darkTheme),
+                    ),
+                    start = phraseStart,
+                    end = phraseEnd,
+                )
+            }
+        }
+
     val start = highlightStart?.coerceIn(page.start, page.end)?.minus(page.start)
     val end = highlightEnd?.coerceIn(page.start, page.end)?.minus(page.start)
-
-    if (start == null || end == null || end <= start) {
-        append(pageText)
-        return@buildAnnotatedString
+    if (start != null && end != null && end > start) {
+        addStyle(
+            style = SpanStyle(
+                background = ReaderHighlight,
+                fontWeight = FontWeight.SemiBold,
+            ),
+            start = start,
+            end = end,
+        )
     }
+}
 
-    append(pageText.substring(0, start))
-    withStyle(
-        SpanStyle(
-            background = ReaderHighlight,
-            fontWeight = FontWeight.SemiBold,
-        ),
-    ) {
-        append(pageText.substring(start, end))
+internal fun speakerHighlightColor(
+    speakerId: String,
+    darkTheme: Boolean,
+): Color {
+    val paletteIndex = (speakerId.hashCode() and Int.MAX_VALUE) % SPEAKER_PALETTE.size
+    return SPEAKER_PALETTE[paletteIndex].copy(alpha = if (darkTheme) 0.42f else 0.28f)
+}
+
+private val SPEAKER_PALETTE = listOf(
+    Color(0xFFFFB74D),
+    Color(0xFF4DD0E1),
+    Color(0xFFF06292),
+    Color(0xFF81C784),
+    Color(0xFFBA68C8),
+    Color(0xFFFF8A65),
+    Color(0xFF64B5F6),
+    Color(0xFFDCE775),
+    Color(0xFF7986CB),
+    Color(0xFF4DB6AC),
+)
+
+private const val MAX_LEGEND_SPEAKERS = 16
+
+private fun formatCoverage(coverage: Float): String {
+    val percentage = coverage.coerceIn(0f, 1f) * 100f
+    return when {
+        percentage == 0f -> "0%"
+        percentage < 0.1f -> "<0.1%"
+        percentage < 10f -> "${(percentage * 10).roundToInt() / 10f}%"
+        else -> "${percentage.roundToInt()}%"
     }
-    append(pageText.substring(end))
 }
 
 @Composable

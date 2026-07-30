@@ -10,10 +10,7 @@ import java.io.File
 import java.text.Normalizer
 import java.util.Locale
 import kotlin.math.exp
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -24,23 +21,12 @@ class OnnxTinyBertSpeakerScorer(
 
     private val applicationContext = context.applicationContext
     private val initializationMutex = Mutex()
-    private val warmupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Volatile
     private var runtime: Runtime? = null
 
     init {
         removeLegacyGenerativeModel()
-        warmupScope.launch {
-            runCatching {
-                scoreCandidates(
-                    scene = "Alice said, Target dialogue: \u201cWe should go now.\u201d",
-                    candidates = listOf("Alice", "Bob"),
-                )
-            }.onFailure { error ->
-                Log.w(TAG, "TinyBERT warm-up failed; attribution will use rules", error)
-            }
-        }
     }
 
     override suspend fun scoreCandidates(

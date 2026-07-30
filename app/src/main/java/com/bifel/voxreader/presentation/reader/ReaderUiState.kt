@@ -26,6 +26,10 @@ data class ReaderUiState(
     val activePhraseIndex: Int? = null,
     val highlightStart: Int? = null,
     val highlightEnd: Int? = null,
+    val cachedSpeakerPhraseIndices: Set<Int> = emptySet(),
+    val cachedAttributionProvider: String? = null,
+    val cachedAttributionCoverage: Float = 0f,
+    val analysisMessage: String? = null,
     val lastAnalysisSource: CharacterAnalysisSource = CharacterAnalysisSource.RULES,
     val errorMessage: String? = null,
 ) {

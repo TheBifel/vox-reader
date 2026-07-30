@@ -1,5 +1,9 @@
 # VoxReader: product and high-level solution
 
+The whole-book speaker-analysis exchange format is documented in
+[`SPEAKER_ANALYSIS_TSV.md`](SPEAKER_ANALYSIS_TSV.md). It is the shared contract for manual,
+cloud/outsourced, desktop, and future overnight analysis.
+
 ## What the app does
 
 VoxReader is an offline-first Android EPUB reader designed around synchronized read-aloud

@@ -19,8 +19,10 @@ import com.bifel.voxreader.domain.speech.SpeechRequest
 import com.bifel.voxreader.domain.text.SentenceSegmenter
 import com.bifel.voxreader.domain.usecase.ImportBookUseCase
 import com.bifel.voxreader.domain.usecase.LoadLatestBookUseCase
+import com.bifel.voxreader.data.preanalysis.PortableAnalysisService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 class ReaderViewModel(
     private val importBook: ImportBookUseCase,
@@ -36,6 +39,7 @@ class ReaderViewModel(
     private val settingsRepository: SettingsRepository,
     private val characterAnalyzer: CharacterAnalyzer,
     private val speechEngine: SpeechEngine,
+    private val portableAnalysisService: PortableAnalysisService,
 ) : ViewModel() {
 
     private val mutableUiState = MutableStateFlow(ReaderUiState())
@@ -176,6 +180,71 @@ class ReaderViewModel(
         mutableUiState.update { it.copy(errorMessage = null) }
     }
 
+    suspend fun createAnalysisSidecar(): String {
+        val state = mutableUiState.value
+        val book = requireNotNull(state.book) { "Open a book before exporting analysis." }
+        return withContext(Dispatchers.Default) {
+            portableAnalysisService.export(book, state.phrases)
+        }
+    }
+
+    fun importAnalysisSidecar(content: String) {
+        val state = mutableUiState.value
+        val book = state.book ?: run {
+            showError(IllegalStateException("Open a book before importing analysis."))
+            return
+        }
+        stopPlayback(clearSelection = false)
+        mutableUiState.update { it.copy(analysisMessage = "Validating analysis file…") }
+        viewModelScope.launch {
+            runCatching {
+                withContext(Dispatchers.Default) {
+                    val result = portableAnalysisService.import(book, state.phrases, content)
+                    val cached = portableAnalysisService.cached(
+                        book = book,
+                        phrases = SentenceSegmenter.segment(book.text),
+                    )
+                    result to cached
+                }
+            }.onSuccess { (result, cached) ->
+                analyzedPhraseRanges.clear()
+                val characters = cached.characters.ifEmpty { listOf(NarratorProfile) }
+                storedBook = storedBook?.copy(characters = characters)
+                mutableUiState.update {
+                    it.copy(
+                        phrases = cached.phrases,
+                        characters = characters,
+                        cachedSpeakerPhraseIndices = cached.cachedPhraseIndices,
+                        cachedAttributionProvider = cached.providerId,
+                        cachedAttributionCoverage = cached.coverage,
+                        analysisMessage = buildString {
+                            append("Loaded ")
+                            append(result.attributedPhrases)
+                            append('/')
+                            append(result.totalPhrases)
+                            append(" cached phrases and ")
+                            append(result.characterCount)
+                            append(" character")
+                            if (result.characterCount != 1) append('s')
+                            append('.')
+                        },
+                        errorMessage = null,
+                    )
+                }
+            }.onFailure(::showError)
+        }
+    }
+
+    fun analysisFileExported() {
+        mutableUiState.update {
+            it.copy(analysisMessage = "Analysis TSV exported. Process it externally, then import it.")
+        }
+    }
+
+    fun reportAnalysisFileError(error: Throwable) {
+        showError(error)
+    }
+
     private fun loadLatest() {
         mutableUiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
@@ -191,20 +260,30 @@ class ReaderViewModel(
         }
     }
 
-    private fun showBook(
+    private suspend fun showBook(
         document: BookDocument,
         stored: StoredBook,
     ) {
         storedBook = stored
         analyzedPhraseRanges.clear()
-        val phrases = SentenceSegmenter.segment(document.text)
+        val segmentedPhrases = SentenceSegmenter.segment(document.text)
+        val cached = withContext(Dispatchers.Default) {
+            portableAnalysisService.cached(document, segmentedPhrases)
+        }
+        val phrases = cached.phrases
+        val characters = if (cached.providerId != null) {
+            cached.characters.ifEmpty { listOf(NarratorProfile) }
+        } else {
+            stored.characters.ifEmpty { listOf(NarratorProfile) }
+        }
+        storedBook = stored.copy(characters = characters)
         val restoredPosition = stored.readingPosition.coerceIn(0, document.text.length)
         mutableUiState.update { current ->
             current.copy(
                 isLoading = false,
                 book = document,
                 phrases = phrases,
-                characters = stored.characters.ifEmpty { listOf(NarratorProfile) },
+                characters = characters,
                 pageStart = restoredPosition,
                 pageEnd = stored.pageEndPosition.coerceIn(restoredPosition, document.text.length),
                 playbackState = if (current.speechControlsEnabled) {
@@ -215,6 +294,12 @@ class ReaderViewModel(
                 activePhraseIndex = null,
                 highlightStart = null,
                 highlightEnd = null,
+                cachedSpeakerPhraseIndices = cached.cachedPhraseIndices,
+                cachedAttributionProvider = cached.providerId,
+                cachedAttributionCoverage = cached.coverage,
+                analysisMessage = cached.providerId?.let {
+                    "Using cached speaker analysis from $it."
+                },
                 errorMessage = null,
             )
         }
@@ -382,7 +467,8 @@ class ReaderViewModel(
         mutableUiState.value.activePhraseIndex?.let(mutableUiState.value.phrases::getOrNull)
 
     private fun isPhraseAnalyzed(index: Int): Boolean =
-        analyzedPhraseRanges.any { index in it }
+        index in mutableUiState.value.cachedSpeakerPhraseIndices ||
+            analyzedPhraseRanges.any { index in it }
 
     private suspend fun ensurePhraseAnalyzed(
         book: BookDocument,
@@ -397,14 +483,24 @@ class ReaderViewModel(
             val analysis = characterAnalyzer.analyze(
                 CharacterAnalysisRequest(
                     text = book.text,
-                    knownCharacters = storedBook?.characters.orEmpty(),
+                    knownCharacters = latest.characters,
                     existingPhrases = latest.phrases,
                     focusPosition = phrase.start,
-                    preservedPhraseRanges = analyzedPhraseRanges.toList(),
+                    preservedPhraseRanges = analyzedPhraseRanges.toList() +
+                        cachedPhraseRanges(latest.cachedSpeakerPhraseIndices),
                 ),
             )
-            val resolvedPhrase = analysis.phrases.getOrNull(index)
-            val resolvedProfile = analysis.characters.firstOrNull {
+            val mergedPhrases = analysis.phrases.mapIndexed { phraseIndex, analyzed ->
+                if (phraseIndex in latest.cachedSpeakerPhraseIndices) {
+                    latest.phrases.getOrNull(phraseIndex) ?: analyzed
+                } else {
+                    analyzed
+                }
+            }
+            val mergedCharacters = (latest.characters + analysis.characters)
+                .distinctBy(CharacterProfile::id)
+            val resolvedPhrase = mergedPhrases.getOrNull(index)
+            val resolvedProfile = mergedCharacters.firstOrNull {
                 it.id == resolvedPhrase?.speakerId
             } ?: NarratorProfile
             Log.d(
@@ -414,16 +510,30 @@ class ReaderViewModel(
                     "(${resolvedProfile.voiceGroup}) using ${analysis.source}",
             )
             analysis.analyzedPhraseRange?.let(::rememberAnalyzedRange)
-            storedBook = storedBook?.copy(characters = analysis.characters)
+            storedBook = storedBook?.copy(characters = mergedCharacters)
             mutableUiState.update {
                 it.copy(
-                    phrases = analysis.phrases,
-                    characters = analysis.characters,
+                    phrases = mergedPhrases,
+                    characters = mergedCharacters,
                     lastAnalysisSource = analysis.source,
                 )
             }
-            libraryRepository.updateCharacters(book.id, analysis.characters)
+            libraryRepository.updateCharacters(book.id, mergedCharacters)
         }
+    }
+
+    private fun cachedPhraseRanges(indices: Set<Int>): List<IntRange> {
+        if (indices.isEmpty()) return emptyList()
+        val ranges = mutableListOf<IntRange>()
+        indices.sorted().forEach { index ->
+            val previous = ranges.lastOrNull()
+            if (previous != null && index == previous.last + 1) {
+                ranges[ranges.lastIndex] = previous.first..index
+            } else {
+                ranges += index..index
+            }
+        }
+        return ranges
     }
 
     /**
@@ -539,6 +649,7 @@ class ReaderViewModel(
         private val settingsRepository: SettingsRepository,
         private val characterAnalyzer: CharacterAnalyzer,
         private val speechEngine: SpeechEngine,
+        private val portableAnalysisService: PortableAnalysisService,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
@@ -549,6 +660,7 @@ class ReaderViewModel(
                 settingsRepository = settingsRepository,
                 characterAnalyzer = characterAnalyzer,
                 speechEngine = speechEngine,
+                portableAnalysisService = portableAnalysisService,
             ) as T
     }
 }

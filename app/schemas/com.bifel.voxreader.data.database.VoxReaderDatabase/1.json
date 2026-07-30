@@ -1,0 +1,426 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "fa62b55592257b7f6fc45ce8bd743111",
+    "entities": [
+      {
+        "tableName": "analysis_run",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`runId` TEXT NOT NULL, `bookId` TEXT NOT NULL, `providerId` TEXT NOT NULL, `providerModelId` TEXT, `status` TEXT NOT NULL, `totalPhrases` INTEGER NOT NULL, `completedPhrases` INTEGER NOT NULL, `attributedPhrases` INTEGER NOT NULL, `active` INTEGER NOT NULL, `cancelRequested` INTEGER NOT NULL, `manifestVersion` INTEGER NOT NULL, `segmentationVersion` INTEGER NOT NULL, `attributionPolicyVersion` INTEGER NOT NULL, `providerSchemaVersion` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `completedAt` INTEGER, `safeErrorCode` TEXT, PRIMARY KEY(`runId`))",
+        "fields": [
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookId",
+            "columnName": "bookId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerId",
+            "columnName": "providerId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerModelId",
+            "columnName": "providerModelId",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalPhrases",
+            "columnName": "totalPhrases",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedPhrases",
+            "columnName": "completedPhrases",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attributedPhrases",
+            "columnName": "attributedPhrases",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "active",
+            "columnName": "active",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cancelRequested",
+            "columnName": "cancelRequested",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manifestVersion",
+            "columnName": "manifestVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "segmentationVersion",
+            "columnName": "segmentationVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attributionPolicyVersion",
+            "columnName": "attributionPolicyVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "providerSchemaVersion",
+            "columnName": "providerSchemaVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completedAt",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "safeErrorCode",
+            "columnName": "safeErrorCode",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "runId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_analysis_run_bookId",
+            "unique": false,
+            "columnNames": [
+              "bookId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_analysis_run_bookId` ON `${TABLE_NAME}` (`bookId`)"
+          },
+          {
+            "name": "index_analysis_run_bookId_active",
+            "unique": false,
+            "columnNames": [
+              "bookId",
+              "active"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_analysis_run_bookId_active` ON `${TABLE_NAME}` (`bookId`, `active`)"
+          },
+          {
+            "name": "index_analysis_run_bookId_updatedAt",
+            "unique": false,
+            "columnNames": [
+              "bookId",
+              "updatedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_analysis_run_bookId_updatedAt` ON `${TABLE_NAME}` (`bookId`, `updatedAt`)"
+          }
+        ]
+      },
+      {
+        "tableName": "phrase_manifest",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bookId` TEXT NOT NULL, `phraseId` TEXT NOT NULL, `phraseIndex` INTEGER NOT NULL, `start` INTEGER NOT NULL, `end` INTEGER NOT NULL, `normalizedTextHash` TEXT NOT NULL, `manifestVersion` INTEGER NOT NULL, `segmentationVersion` INTEGER NOT NULL, PRIMARY KEY(`bookId`, `phraseId`))",
+        "fields": [
+          {
+            "fieldPath": "bookId",
+            "columnName": "bookId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phraseId",
+            "columnName": "phraseId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phraseIndex",
+            "columnName": "phraseIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "start",
+            "columnName": "start",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "end",
+            "columnName": "end",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedTextHash",
+            "columnName": "normalizedTextHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "manifestVersion",
+            "columnName": "manifestVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "segmentationVersion",
+            "columnName": "segmentationVersion",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bookId",
+            "phraseId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_phrase_manifest_bookId_phraseIndex",
+            "unique": true,
+            "columnNames": [
+              "bookId",
+              "phraseIndex"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_phrase_manifest_bookId_phraseIndex` ON `${TABLE_NAME}` (`bookId`, `phraseIndex`)"
+          },
+          {
+            "name": "index_phrase_manifest_bookId_start_end",
+            "unique": false,
+            "columnNames": [
+              "bookId",
+              "start",
+              "end"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_phrase_manifest_bookId_start_end` ON `${TABLE_NAME}` (`bookId`, `start`, `end`)"
+          }
+        ]
+      },
+      {
+        "tableName": "phrase_attribution",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`runId` TEXT NOT NULL, `bookId` TEXT NOT NULL, `phraseId` TEXT NOT NULL, `characterId` TEXT NOT NULL, `confidence` REAL NOT NULL, `source` TEXT NOT NULL, `evidence` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`runId`, `phraseId`))",
+        "fields": [
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookId",
+            "columnName": "bookId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "phraseId",
+            "columnName": "phraseId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "characterId",
+            "columnName": "characterId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "confidence",
+            "columnName": "confidence",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "evidence",
+            "columnName": "evidence",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "runId",
+            "phraseId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_phrase_attribution_bookId",
+            "unique": false,
+            "columnNames": [
+              "bookId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_phrase_attribution_bookId` ON `${TABLE_NAME}` (`bookId`)"
+          },
+          {
+            "name": "index_phrase_attribution_bookId_phraseId",
+            "unique": false,
+            "columnNames": [
+              "bookId",
+              "phraseId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_phrase_attribution_bookId_phraseId` ON `${TABLE_NAME}` (`bookId`, `phraseId`)"
+          },
+          {
+            "name": "index_phrase_attribution_characterId",
+            "unique": false,
+            "columnNames": [
+              "characterId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_phrase_attribution_characterId` ON `${TABLE_NAME}` (`characterId`)"
+          }
+        ]
+      },
+      {
+        "tableName": "character_registry",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`bookId` TEXT NOT NULL, `runId` TEXT NOT NULL, `characterId` TEXT NOT NULL, `displayName` TEXT NOT NULL, `aliases` TEXT NOT NULL, `voiceGroup` TEXT NOT NULL, `voiceSlot` INTEGER NOT NULL, `pitch` REAL NOT NULL, `speechRate` REAL NOT NULL, PRIMARY KEY(`bookId`, `runId`, `characterId`))",
+        "fields": [
+          {
+            "fieldPath": "bookId",
+            "columnName": "bookId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "runId",
+            "columnName": "runId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "characterId",
+            "columnName": "characterId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "displayName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliases",
+            "columnName": "aliases",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "voiceGroup",
+            "columnName": "voiceGroup",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "voiceSlot",
+            "columnName": "voiceSlot",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pitch",
+            "columnName": "pitch",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "speechRate",
+            "columnName": "speechRate",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "bookId",
+            "runId",
+            "characterId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_character_registry_bookId_runId",
+            "unique": false,
+            "columnNames": [
+              "bookId",
+              "runId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_character_registry_bookId_runId` ON `${TABLE_NAME}` (`bookId`, `runId`)"
+          },
+          {
+            "name": "index_character_registry_bookId_displayName",
+            "unique": false,
+            "columnNames": [
+              "bookId",
+              "displayName"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_character_registry_bookId_displayName` ON `${TABLE_NAME}` (`bookId`, `displayName`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'fa62b55592257b7f6fc45ce8bd743111')"
+    ]
+  }
+}
