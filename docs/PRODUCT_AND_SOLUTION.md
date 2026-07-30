@@ -1,0 +1,282 @@
+# VoxReader: product and high-level solution
+
+## What the app does
+
+VoxReader is an offline-first Android EPUB reader designed around synchronized read-aloud
+playback. The reader displays a book as fixed pages, speaks the text currently being read, and
+highlights the active text as speech progresses. Dialogue is associated with recurring fictional
+characters, and each character receives a stable local voice variation.
+
+The initial proof of concept deliberately avoids voice cloning, cloud services, accounts, and
+large GPU models. It uses voices already available in Android's local text-to-speech engine and
+differentiates characters through voice selection, pitch, and speaking-rate profiles.
+
+The long-term goal is a private audiobook-like reading experience that:
+
+- works without an internet connection;
+- begins playback quickly instead of rendering an entire audiobook first;
+- remembers the last book and reading position;
+- keeps a character's assigned voice stable across the book;
+- remains usable on an ordinary Android phone; and
+- allows the analysis and speech implementations to improve without replacing the reader.
+
+## Core user experience
+
+### Importing and reopening books
+
+A new book is opened from Android's Files app or another file manager by tapping an `.epub` file
+and choosing VoxReader. The app copies the source file into its private application storage, parses
+the reading order, and remembers the imported book in DataStore.
+
+Launching VoxReader normally reopens the most recently used book at the saved page position.
+There is intentionally no in-app library browser or file picker in this POC.
+
+### Reading
+
+The EPUB text is laid out into viewport-sized pages. Pagination is calculated from the actual
+Compose text measurements, screen dimensions, and reader typography. The stored position is a
+character offset rather than a fragile page number, allowing the page to be reconstructed after a
+screen-size or orientation change.
+
+The tap zones follow the requested interaction:
+
+- tap the left third to move to the next page;
+- tap the right third to move to the previous page;
+- tap the middle third to reveal or hide the reader header;
+- use the header's hamburger button to open reader settings.
+
+A thin progress bar at the bottom represents the current character offset as a proportion of the
+book's total extracted text.
+
+### Appearance and speech controls
+
+The drawer contains:
+
+- a dark/light reader theme switch; and
+- a command to enable or hide text-to-speech controls.
+
+The dark theme uses a near-black background and warm white text. The light theme reverses that
+relationship with a warm paper background and dark text.
+
+When speech controls are enabled, previous-sentence, play/pause, and next-sentence controls appear
+above the reading progress bar. Pressing play starts from the first sentence visible on the
+current page. During initial speech preparation, the play button becomes a loader. This loader
+represents real work: character analysis and Android TTS initialization.
+
+While speaking, Android's range callbacks update the highlighted text. When the spoken range moves
+outside the current page, the reader automatically lays out and displays the page containing that
+range. If an installed TTS engine does not provide word/range timings, the whole active sentence is
+highlighted as a fallback.
+
+## High-level processing flow
+
+```mermaid
+flowchart LR
+    A["Tap EPUB in Files"] --> B["Android ACTION_VIEW intent"]
+    B --> C["Copy EPUB to private storage"]
+    C --> D["Parse container, package, manifest, and spine"]
+    D --> E["Extract normalized chapter text"]
+    E --> F["Restore character offset from DataStore"]
+    F --> G["Measure and display current page"]
+    G --> H["User enables speech and presses play"]
+    H --> I["Segment sentences and attribute dialogue"]
+    I --> J["Match or create persistent character profiles"]
+    J --> K["Choose offline Android voice, pitch, and rate"]
+    K --> L["Speak one sentence"]
+    L --> M["Highlight TTS range and preselect next sentence"]
+    M --> L
+```
+
+The app generates speech one sentence at a time. It does not prerecord a chapter or complete book.
+Android produces the current sentence while the application already knows which sentence follows,
+giving immediate playback and deterministic previous/next controls.
+
+## Architecture
+
+VoxReader is a single-activity Compose application using MVVM and explicit dependency injection.
+The source is divided by responsibility:
+
+```text
+com.bifel.voxreader
+├── domain
+│   ├── model          Pure application models
+│   ├── repository     Storage and book-source contracts
+│   ├── analysis       CharacterAnalyzer contract
+│   ├── speech         SpeechEngine contract and events
+│   ├── text           Sentence segmentation
+│   └── usecase        Import and restore workflows
+├── data
+│   ├── epub           Local file import and EPUB parser
+│   ├── preferences    DataStore repository
+│   ├── analysis       Rule-based CharacterAnalyzer
+│   └── speech         Android TextToSpeech adapter
+├── presentation
+│   ├── reader         Reader ViewModel, UI state, pagination, and screen
+│   └── theme          Warm dark/light Compose themes
+├── AppContainer       Application-scoped dependency composition
+├── VoxReaderApplication
+└── MainActivity       Intent entry point and Compose host
+```
+
+### MVVM responsibilities
+
+`ReaderViewModel` owns durable screen state and coordinates use cases:
+
+- loading or importing a book;
+- restoring and saving reading position;
+- preparing character analysis;
+- controlling sentence-level playback;
+- mapping TTS timing events to global book offsets; and
+- exposing immutable `ReaderUiState`.
+
+Compose owns layout-specific state that cannot exist independently of the UI, notably the measured
+end of a page. The UI reports each calculated page range to the ViewModel, which persists the
+corresponding character offset.
+
+Data implementations do not leak into the ViewModel. It depends on interfaces such as
+`BookRepository`, `LibraryRepository`, `CharacterAnalyzer`, and `SpeechEngine`.
+
+### SOLID design choices
+
+- **Single responsibility:** EPUB parsing, persistence, dialogue analysis, speech synthesis,
+  pagination, and UI orchestration are separate classes.
+- **Open/closed:** a model-backed analyzer can replace `RuleBasedCharacterAnalyzer` by implementing
+  `CharacterAnalyzer`; a Kokoro/sherpa-onnx engine can implement `SpeechEngine`.
+- **Liskov substitution:** callers use the domain contracts and do not depend on Android TTS or
+  DataStore implementation details.
+- **Interface segregation:** storage, settings, character analysis, and speech have small,
+  purpose-specific contracts.
+- **Dependency inversion:** the ViewModel and use cases depend on domain interfaces; `AppContainer`
+  selects concrete Android implementations at the application boundary.
+
+Manual dependency injection is intentional for this small POC. It avoids annotation processing and
+keeps object ownership visible. Hilt can be introduced later if the object graph becomes complex.
+
+## EPUB handling
+
+The parser uses the standard EPUB structure:
+
+1. read `META-INF/container.xml`;
+2. locate the OPF package document;
+3. read metadata, manifest, and spine;
+4. resolve XHTML documents in spine order;
+5. remove scripts, styles, navigation, and SVG content;
+6. extract headings, paragraphs, list items, and preformatted text; and
+7. join chapters into one normalized text stream.
+
+Images, CSS layout, footnotes, tables, embedded fonts, media overlays, and DRM are outside the POC.
+The imported source EPUB remains in private storage so it can be reparsed on later launches.
+
+## Persistence
+
+Jetpack Preferences DataStore is the durable source for:
+
+- theme choice;
+- whether speech controls are enabled;
+- imported-book metadata;
+- the latest book ID;
+- page start/end character offsets; and
+- per-book character names and voice profiles.
+
+Book text is not duplicated inside DataStore. EPUB files live under the app's private `files/books`
+directory and are named by a SHA-256 digest. Reopening the same source therefore reuses the stored
+copy and its existing progress/character profiles.
+
+## Character attribution in the POC
+
+The current implementation uses deterministic, inexpensive rules:
+
+- split the book with the platform sentence boundary detector;
+- recognize dialogue quotation marks;
+- look for patterns such as `Alice said` and `asked Bob`;
+- use nearby `he`/`she` attribution when a known recent character matches;
+- use recent dialogue participants as a fallback for alternating dialogue; and
+- retain a narrator profile for non-dialogue text.
+
+New named characters receive a stable ID and one of several voice slots. Pronouns and honorifics
+may select a lower or higher pitch group; otherwise a neutral variation is assigned. Profiles are
+saved per book and reused on subsequent playback.
+
+This is sufficient to validate the reading and speech experience, but it is not expected to solve
+ambiguous literary dialogue reliably.
+
+## Speech generation
+
+`AndroidSpeechEngine` wraps the platform `TextToSpeech` API. It:
+
+- filters out voices that report requiring a network connection;
+- prefers voices matching the device language, then English;
+- assigns voice slots deterministically;
+- applies saved pitch and speaking-rate settings;
+- speaks one sentence per utterance;
+- emits start, range, completion, stop, and error events; and
+- uses range offsets to synchronize highlighting.
+
+Speech is generated in real time. The next sentence starts after the current completion callback.
+Pausing stops the current synthesis; resuming restarts the selected sentence because Android's
+standard TTS API does not expose sample-accurate pause/resume.
+
+## Planned evolution
+
+### POC hardening
+
+- Validate more EPUB variants and malformed files.
+- Add instrumentation tests for file intents and TTS callback handling.
+- Add font size, margins, and line-spacing controls.
+- Add a small voice-assignment screen because Android voice names do not expose reliable gender
+  metadata.
+- Improve long-sentence and nested-quotation handling.
+
+### On-device intelligence
+
+Replace the rule analyzer with a small quantized model that receives a constrained scene window,
+known character aliases, and recent speakers, then returns strict structured attribution. The model
+can analyze several sentences ahead while Android reads the current sentence. Its implementation
+will remain behind `CharacterAnalyzer`.
+
+### Consistent bundled neural voices
+
+If device-dependent Android voices are not good enough, add a `SpeechEngine` backed by
+sherpa-onnx and a lightweight Kokoro model. This would make voice quality and the voice catalogue
+consistent across phones while preserving the same ViewModel, controls, and highlighting flow.
+
+### Product features beyond the POC
+
+- in-app library and file picker;
+- chapter navigation and table of contents;
+- bookmarks, notes, search, and selectable text;
+- configurable tap direction and gestures;
+- background playback and media notification controls;
+- pronunciation overrides;
+- sentence-ahead audio buffering and disk cache; and
+- optional Proxmox-assisted book analysis cached for fully offline playback afterward.
+
+## POC success criteria
+
+The concept is validated when a user can:
+
+1. tap an EPUB in Android Files and open it in VoxReader;
+2. read it as stable pages and return to the same location after restarting;
+3. enable speech and hear playback begin from the visible page with a short preparation state;
+4. see spoken text highlighted and pages advance automatically;
+5. navigate speech by sentence; and
+6. hear recurring characters retain distinguishable voice variations without a server or internet
+   connection.
+
+## Current validation
+
+The POC has been built and exercised on a Samsung Galaxy S21 running Android 15. Validation
+includes:
+
+- opening a real-world EPUB 2 file through an Android `ACTION_VIEW` content URI;
+- extracting and paginating the book text;
+- moving to the next page using the left tap zone;
+- force-stopping and relaunching the app at the saved book and character offset;
+- showing the speech-preparation loader;
+- producing speech with the device's offline Android TTS voice;
+- highlighting the active spoken range; and
+- pausing playback without import, speech, or runtime errors in logcat.
+
+Desktop unit tests cover EPUB order/text extraction, sentence segmentation, and rule-based
+character attribution. A device instrumentation test separately exercises EPUB parsing with
+Android's platform XML implementation because it differs from the desktop JVM parser.

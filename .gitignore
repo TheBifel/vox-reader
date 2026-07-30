@@ -1,0 +1,11 @@
+*.iml
+.gradle
+.idea
+/local.properties
+/build
+/captures
+/.kotlin
+/app/build
+*.log
+/device-*.png
+/device-*.xml

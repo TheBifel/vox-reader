@@ -1,0 +1,34 @@
+package com.bifel.voxreader.domain.speech
+
+import kotlinx.coroutines.flow.SharedFlow
+
+data class SpeechRequest(
+    val utteranceId: String,
+    val text: String,
+    val voiceSlot: Int,
+    val pitch: Float,
+    val speechRate: Float,
+)
+
+sealed interface SpeechEvent {
+    data object Ready : SpeechEvent
+    data class Started(val utteranceId: String) : SpeechEvent
+    data class Range(
+        val utteranceId: String,
+        val start: Int,
+        val end: Int,
+    ) : SpeechEvent
+
+    data class Completed(val utteranceId: String) : SpeechEvent
+    data class Stopped(val utteranceId: String, val interrupted: Boolean) : SpeechEvent
+    data class Error(val utteranceId: String?, val message: String) : SpeechEvent
+}
+
+interface SpeechEngine {
+    val events: SharedFlow<SpeechEvent>
+
+    suspend fun awaitReady()
+    fun speak(request: SpeechRequest)
+    fun stop()
+}
+
