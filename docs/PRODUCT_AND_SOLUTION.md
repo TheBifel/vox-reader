@@ -76,7 +76,9 @@ When speech controls are enabled, previous-sentence, play/pause, and next-senten
 above the reading progress bar. A speed control above them adjusts global playback from `0.5x` to
 `2.0x` and is remembered across launches. Pressing play starts from the first speakable sentence
 visible on the current page. During initial speech preparation, the play button becomes a loader.
-This loader represents character-data preparation and Android TTS initialization.
+This loader represents character-data preparation and Android TTS initialization. Once playback
+starts, buffered sentence transitions retain the normal pause button; the loader returns only if
+the rolling buffer genuinely runs dry.
 
 While speaking, Android's range callbacks update the highlighted text. When the spoken range moves
 outside the current page, the reader automatically lays out and displays the page containing that
@@ -108,14 +110,18 @@ flowchart LR
     M --> O
     O --> P["Choose offline Android voice and saved profile"]
     P --> Q["Apply global speed and optional phrase emotion"]
-    Q --> S["Speak one sentence"]
-    S --> R["Highlight TTS range and preselect next sentence"]
-    R --> Q
+    Q --> S["Queue current sentence plus two look-ahead sentences"]
+    S --> R["Speak and highlight the current TTS range"]
+    R --> T["Refill the rolling three-sentence queue"]
+    T --> R
 ```
 
-The app generates speech one sentence at a time. It does not prerecord a chapter or complete book.
-Android produces the current sentence while the application already knows which sentence follows,
-giving immediate playback and deterministic previous/next controls.
+The app generates speech in real time and does not prerecord a chapter or complete book. It keeps
+three sentence utterances in Android TTS: the sentence being spoken and two look-ahead sentences.
+Each queued request snapshots its character voice, pitch, rate, and emotion pause. When one
+utterance completes, Android starts the next prepared request and VoxReader appends another
+sentence to the tail. This removes the voice-loading pause from normal character changes while
+retaining deterministic previous/next controls.
 
 ## Architecture
 
@@ -245,10 +251,11 @@ version changes neutralize old uncertain profiles before they are grounded again
 `AndroidSpeechEngine` wraps the platform `TextToSpeech` API. It:
 
 - filters out voices that report requiring a network connection;
-- prefers voices matching the device language, then English;
+- selects one installed English locale pack with both male and female choices, avoiding expensive
+  cross-locale pipeline switches;
 - assigns voice slots deterministically;
 - applies saved pitch and speaking-rate settings;
-- speaks one sentence per utterance;
+- queues three independently configured sentence utterances with `QUEUE_ADD`;
 - emits start, range, completion, stop, and error events; and
 - uses range offsets to synchronize highlighting.
 
@@ -259,9 +266,12 @@ fear is faster and higher with a shorter pause. Emotion intensity controls how f
 moves away from neutral. User-edited voice settings are kept separately from the imported JSON,
 so reimporting an updated analysis does not erase those choices.
 
-Speech is generated in real time. The next sentence starts after the current completion callback.
-Pausing stops the current synthesis; resuming restarts the selected sentence because Android's
-standard TTS API does not expose sample-accurate pause/resume.
+Speech is generated in real time. Look-ahead requests are submitted while the current sentence is
+playing, so the completion callback advances to already queued audio instead of starting synthesis
+from scratch. Neutral delivery adds no artificial inter-sentence delay; an explicit sadness pause
+is queued by Android TTS and does not block application code. Pausing clears the rolling queue and
+stops the current synthesis; resuming rebuilds the queue from the selected sentence because
+Android's standard TTS API does not expose sample-accurate pause/resume.
 
 ## Planned evolution
 
@@ -322,6 +332,7 @@ includes:
 - force-stopping and relaunching the app at the saved book and character offset;
 - showing the speech-preparation loader;
 - producing speech with the device's offline Android TTS voice;
+- keeping normal queued sentence transitions within a few milliseconds after voice warm-up;
 - highlighting the active spoken range; and
 - pausing playback without import, speech, or runtime errors in logcat.
 

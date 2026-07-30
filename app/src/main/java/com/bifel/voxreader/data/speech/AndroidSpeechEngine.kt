@@ -10,6 +10,7 @@ import com.bifel.voxreader.BuildConfig
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.speech.SpeechEngine
 import com.bifel.voxreader.domain.speech.SpeechEvent
+import com.bifel.voxreader.domain.speech.SpeechQueueMode
 import com.bifel.voxreader.domain.speech.SpeechRequest
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,6 +33,9 @@ class AndroidSpeechEngine(
     private var offlineVoices: List<Voice> = emptyList()
     private var maleVoices: List<Voice> = emptyList()
     private var femaleVoices: List<Voice> = emptyList()
+    private var configuredVoiceName: String? = null
+    private var configuredPitch: Float? = null
+    private var configuredSpeechRate: Float? = null
     private lateinit var textToSpeech: TextToSpeech
 
     private fun ensureStarted() {
@@ -65,7 +69,10 @@ class AndroidSpeechEngine(
         }
     }
 
-    override fun speak(request: SpeechRequest) {
+    override fun enqueue(
+        request: SpeechRequest,
+        queueMode: SpeechQueueMode,
+    ) {
         if (initialization.value != Initialization.Ready) {
             mutableEvents.tryEmit(
                 SpeechEvent.Error(
@@ -83,32 +90,59 @@ class AndroidSpeechEngine(
             VoiceGroup.NEUTRAL,
             -> offlineVoices
         }.ifEmpty { offlineVoices }
+        var selectedVoiceName: String? = null
         if (voicePool.isNotEmpty()) {
             val selectedVoice = voicePool[Math.floorMod(request.voiceSlot, voicePool.size)]
-            textToSpeech.voice = selectedVoice
+            selectedVoiceName = selectedVoice.name
+            if (configuredVoiceName != selectedVoice.name) {
+                textToSpeech.voice = selectedVoice
+                configuredVoiceName = selectedVoice.name
+            }
             if (BuildConfig.DEBUG) {
                 Log.d(
                     TAG,
-                    "Using ${request.voiceGroup} voice ${selectedVoice.name}; " +
-                        "pitch=${request.pitch}; rate=${request.speechRate}",
+                    "Queued ${request.voiceGroup} voice ${selectedVoice.name}; " +
+                        "pitch=${request.pitch}; rate=${request.speechRate}; mode=$queueMode",
                 )
             }
         }
-        textToSpeech.setPitch(request.pitch.coerceIn(0.5f, 1.6f))
-        textToSpeech.setSpeechRate(request.speechRate.coerceIn(0.5f, 2f))
+        val pitch = request.pitch.coerceIn(0.5f, 1.6f)
+        val speechRate = request.speechRate.coerceIn(0.5f, 2f)
+        if (configuredPitch != pitch) {
+            textToSpeech.setPitch(pitch)
+            configuredPitch = pitch
+        }
+        if (configuredSpeechRate != speechRate) {
+            textToSpeech.setSpeechRate(speechRate)
+            configuredSpeechRate = speechRate
+        }
 
         val result = textToSpeech.speak(
             request.text,
-            TextToSpeech.QUEUE_FLUSH,
+            when (queueMode) {
+                SpeechQueueMode.FLUSH -> TextToSpeech.QUEUE_FLUSH
+                SpeechQueueMode.APPEND -> TextToSpeech.QUEUE_ADD
+            },
             null,
             request.utteranceId,
         )
         if (result == TextToSpeech.ERROR) {
+            Log.e(
+                TAG,
+                "Android rejected queued utterance ${request.utteranceId} " +
+                    "for voice $selectedVoiceName.",
+            )
             mutableEvents.tryEmit(
                 SpeechEvent.Error(
                     request.utteranceId,
                     "Android rejected the speech request.",
                 ),
+            )
+        } else if (request.pauseAfterMillis > 0L) {
+            textToSpeech.playSilentUtterance(
+                request.pauseAfterMillis,
+                TextToSpeech.QUEUE_ADD,
+                "${request.utteranceId}:emotion-pause",
             )
         }
     }
@@ -134,11 +168,24 @@ class AndroidSpeechEngine(
             .filterNot { "notInstalled" in it.features }
             .filter { it.locale.language == Locale.ENGLISH.language }
             .filterNot { it.name.endsWith("-language") }
-        offlineVoices = available
+        val preferredVoicePack = available
+            .groupBy { it.locale }
+            .entries
+            .sortedWith(
+                compareByDescending<Map.Entry<Locale, List<Voice>>> {
+                    voiceGroupCoverage(it.value)
+                }
+                    .thenByDescending { it.key.country == Locale.getDefault().country }
+                    .thenByDescending { it.key.country == Locale.US.country }
+                    .thenByDescending { it.value.size },
+            )
+            .firstOrNull()
+            ?.value
+            .orEmpty()
+            .ifEmpty { available }
+        offlineVoices = preferredVoicePack
             .sortedWith(
                 compareBy<Voice>(
-                    { it.locale.country != Locale.getDefault().country },
-                    { it.locale.country != Locale.US.country },
                     { -it.quality },
                     { it.name },
                 ),
@@ -155,7 +202,9 @@ class AndroidSpeechEngine(
                 offlineVoices.mapIndexed { index, voice ->
                     "$index: ${voice.name}; locale=${voice.locale}"
                 }.joinToString(
-                    prefix = "Usable English voices (${maleVoices.size} male, " +
+                    prefix = "Preferred offline voice pack " +
+                        "${offlineVoices.firstOrNull()?.locale ?: "unavailable"} " +
+                        "(${maleVoices.size} male, " +
                         "${femaleVoices.size} female):\n",
                     separator = "\n",
                 ),
@@ -165,21 +214,29 @@ class AndroidSpeechEngine(
 
     private val progressListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {
-            utteranceId?.let { mutableEvents.tryEmit(SpeechEvent.Started(it)) }
+            utteranceId?.let {
+                if (BuildConfig.DEBUG) Log.d(TAG, "Started $it")
+                mutableEvents.tryEmit(SpeechEvent.Started(it))
+            }
         }
 
         override fun onDone(utteranceId: String?) {
-            utteranceId?.let { mutableEvents.tryEmit(SpeechEvent.Completed(it)) }
+            utteranceId?.let {
+                if (BuildConfig.DEBUG) Log.d(TAG, "Completed $it")
+                mutableEvents.tryEmit(SpeechEvent.Completed(it))
+            }
         }
 
         @Deprecated("Required by the Android TTS listener API")
         override fun onError(utteranceId: String?) {
+            Log.e(TAG, "Synthesis failed for $utteranceId")
             mutableEvents.tryEmit(
                 SpeechEvent.Error(utteranceId, "Speech synthesis failed."),
             )
         }
 
         override fun onError(utteranceId: String?, errorCode: Int) {
+            Log.e(TAG, "Synthesis failed for $utteranceId with error $errorCode")
             mutableEvents.tryEmit(
                 SpeechEvent.Error(
                     utteranceId,
@@ -244,5 +301,11 @@ class AndroidSpeechEngine(
             "x-tpc-",
             "x-tpf-",
         )
+
+        fun voiceGroupCoverage(voices: List<Voice>): Int =
+            listOf(
+                maleVoiceMarkers.any { marker -> voices.any { marker in it.name } },
+                femaleVoiceMarkers.any { marker -> voices.any { marker in it.name } },
+            ).count { it }
     }
 }

@@ -10,7 +10,13 @@ data class SpeechRequest(
     val voiceGroup: VoiceGroup,
     val pitch: Float,
     val speechRate: Float,
+    val pauseAfterMillis: Long = 0L,
 )
+
+enum class SpeechQueueMode {
+    FLUSH,
+    APPEND,
+}
 
 sealed interface SpeechEvent {
     data object Ready : SpeechEvent
@@ -30,6 +36,9 @@ interface SpeechEngine {
     val events: SharedFlow<SpeechEvent>
 
     suspend fun awaitReady()
-    fun speak(request: SpeechRequest)
+    fun enqueue(
+        request: SpeechRequest,
+        queueMode: SpeechQueueMode,
+    )
     fun stop()
 }

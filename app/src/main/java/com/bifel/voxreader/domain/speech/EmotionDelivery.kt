@@ -10,16 +10,16 @@ data class EmotionDelivery(
     val pauseAfterMillis: Long = NEUTRAL_PAUSE_MILLIS,
 ) {
     companion object {
-        const val NEUTRAL_PAUSE_MILLIS = 90L
+        const val NEUTRAL_PAUSE_MILLIS = 0L
 
         fun from(emotion: PhraseEmotion?): EmotionDelivery {
             emotion ?: return EmotionDelivery()
             val intensity = emotion.intensity.coerceIn(0f, 1f)
             val target = when (emotion.type) {
-                EmotionType.ANGER -> Target(rate = 1.18f, pitch = 0.94f, pauseMillis = 45L)
+                EmotionType.ANGER -> Target(rate = 1.18f, pitch = 0.94f, pauseMillis = 0L)
                 EmotionType.SADNESS -> Target(rate = 0.82f, pitch = 0.92f, pauseMillis = 320L)
-                EmotionType.EXCITEMENT -> Target(rate = 1.16f, pitch = 1.07f, pauseMillis = 45L)
-                EmotionType.FEAR -> Target(rate = 1.12f, pitch = 1.10f, pauseMillis = 25L)
+                EmotionType.EXCITEMENT -> Target(rate = 1.16f, pitch = 1.07f, pauseMillis = 0L)
+                EmotionType.FEAR -> Target(rate = 1.12f, pitch = 1.10f, pauseMillis = 0L)
                 else -> return EmotionDelivery()
             }
             return EmotionDelivery(
