@@ -20,6 +20,7 @@ interface LibraryRepository {
     suspend fun markOpened(bookId: String)
     suspend fun updateReadingPosition(bookId: String, pageStart: Int, pageEnd: Int)
     suspend fun updateCharacters(bookId: String, characters: List<CharacterProfile>)
+    suspend fun updateVoiceOverride(bookId: String, profile: CharacterProfile)
 }
 
 interface SettingsRepository {
@@ -27,4 +28,5 @@ interface SettingsRepository {
 
     suspend fun setDarkTheme(enabled: Boolean)
     suspend fun setSpeechControlsEnabled(enabled: Boolean)
+    suspend fun setPlaybackSpeed(speed: Float)
 }

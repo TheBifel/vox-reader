@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LightMode
@@ -46,6 +47,8 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,11 +77,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterAnalysisSource
+import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.SpeechPhrase
+import com.bifel.voxreader.domain.model.VoiceGroup
+import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.presentation.theme.ReaderHighlight
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.roundToInt
 
 @Composable
@@ -95,10 +102,13 @@ fun ReaderScreen(
     onPageChanged: (Int, Int, Boolean) -> Unit,
     onExportAnalysis: () -> Unit,
     onImportAnalysis: () -> Unit,
+    onSetPlaybackSpeed: (Float) -> Unit,
+    onUpdateCharacterVoice: (CharacterProfile) -> Unit,
     onDismissError: () -> Unit,
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    var editingCharacterId by remember { mutableStateOf<String?>(null) }
     val speakerColorSlots = remember(state.characters) {
         state.characters
             .asSequence()
@@ -138,6 +148,7 @@ fun ReaderScreen(
                     onImportAnalysis()
                     scope.launch { drawerState.close() }
                 },
+                onEditCharacter = { editingCharacterId = it.id },
             )
         },
     ) {
@@ -155,6 +166,7 @@ fun ReaderScreen(
                 onPlayPause = onPlayPause,
                 onPreviousPhrase = onPreviousPhrase,
                 onNextPhrase = onNextPhrase,
+                onSetPlaybackSpeed = onSetPlaybackSpeed,
                 onPageChanged = onPageChanged,
             )
         }
@@ -172,6 +184,19 @@ fun ReaderScreen(
             text = { Text(message) },
         )
     }
+
+    editingCharacterId
+        ?.let { id -> state.characters.firstOrNull { it.id == id } }
+        ?.let { profile ->
+            CharacterVoiceDialog(
+                profile = profile,
+                onDismiss = { editingCharacterId = null },
+                onSave = {
+                    onUpdateCharacterVoice(it)
+                    editingCharacterId = null
+                },
+            )
+        }
 }
 
 @Composable
@@ -183,6 +208,7 @@ private fun ReaderDrawer(
     onDisableSpeech: () -> Unit,
     onExportAnalysis: () -> Unit,
     onImportAnalysis: () -> Unit,
+    onEditCharacter: (CharacterProfile) -> Unit,
 ) {
     ModalDrawerSheet {
         Column(
@@ -305,7 +331,11 @@ private fun ReaderDrawer(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
                 )
-                CachedSpeakerLegend(state, speakerColorSlots)
+                VoiceProfileList(
+                    state = state,
+                    speakerColorSlots = speakerColorSlots,
+                    onEditCharacter = onEditCharacter,
+                )
             }
             state.analysisMessage?.let { message ->
                 Text(
@@ -321,45 +351,70 @@ private fun ReaderDrawer(
 }
 
 @Composable
-private fun CachedSpeakerLegend(
+private fun VoiceProfileList(
     state: ReaderUiState,
     speakerColorSlots: Map<String, Int>,
+    onEditCharacter: (CharacterProfile) -> Unit,
 ) {
     val cachedSpeakerIds = state.phrases
         .asSequence()
+        .filter { SpeechText.isSpeakable(it.text) }
         .filter { it.index in state.cachedSpeakerPhraseIndices }
         .map(SpeechPhrase::speakerId)
         .filter { it != NARRATOR_ID && it != UNKNOWN_SPEAKER_ID }
         .toSet()
     val speakers = state.characters
-        .filter { it.id in cachedSpeakerIds }
-        .take(MAX_LEGEND_SPEAKERS)
+        .filter {
+            it.id == NARRATOR_ID ||
+                (it.id in cachedSpeakerIds && it.id != UNKNOWN_SPEAKER_ID)
+        }
+        .sortedWith(compareBy({ it.id != NARRATOR_ID }, { it.displayName }))
     if (speakers.isEmpty()) return
 
     Text(
-        text = "Speaker colors",
+        text = "Voices and speaker colors",
         style = MaterialTheme.typography.labelMedium,
         modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
     )
     speakers.forEach { character ->
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { onEditCharacter(character) }
+                .padding(horizontal = 24.dp, vertical = 9.dp),
         ) {
             Box(
                 Modifier
                     .size(18.dp)
                     .background(
-                        speakerHighlightColor(
-                            colorSlot = speakerColorSlots.getValue(character.id),
-                            darkTheme = state.darkTheme,
-                        ),
+                        if (character.id == NARRATOR_ID) {
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.5f)
+                        } else {
+                            speakerHighlightColor(
+                                colorSlot = speakerColorSlots.getValue(character.id),
+                                darkTheme = state.darkTheme,
+                            )
+                        },
                     ),
             )
             Text(
                 text = character.displayName,
                 style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(start = 10.dp),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 10.dp),
+            )
+            Text(
+                text = "${character.voiceGroup.name.lowercase().replaceFirstChar(Char::uppercase)} " +
+                    "· ${formatMultiplier(character.speechRate)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "Edit ${character.displayName} voice",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }
@@ -374,6 +429,7 @@ private fun ReaderContent(
     onPlayPause: () -> Unit,
     onPreviousPhrase: () -> Unit,
     onNextPhrase: () -> Unit,
+    onSetPlaybackSpeed: (Float) -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
 ) {
     Box(
@@ -399,9 +455,11 @@ private fun ReaderContent(
             if (state.speechControlsEnabled) {
                 SpeechControls(
                     playbackState = state.playbackState,
+                    playbackSpeed = state.playbackSpeed,
                     onPrevious = onPreviousPhrase,
                     onPlayPause = onPlayPause,
                     onNext = onNextPhrase,
+                    onSetPlaybackSpeed = onSetPlaybackSpeed,
                 )
             }
 
@@ -589,14 +647,16 @@ private fun highlightedPage(
     val phrasesByIndex = phrases.associateBy(SpeechPhrase::index)
     phrases.asSequence()
         .filter { phrase ->
-            phrase.index in cachedSpeakerPhraseIndices &&
+            SpeechText.isSpeakable(phrase.text) &&
+                phrase.index in cachedSpeakerPhraseIndices &&
                 phrase.speakerId != NARRATOR_ID &&
                 phrase.speakerId != UNKNOWN_SPEAKER_ID &&
                 phrase.end > page.start &&
                 phrase.start < page.end
         }
         .forEach { phrase ->
-            val phraseStart = phrase.start.coerceIn(page.start, page.end) - page.start
+            val phraseStart = includeAdjacentOpeningQuotes(text, phrase.start)
+                .coerceIn(page.start, page.end) - page.start
             val nextPhrase = phrasesByIndex[phrase.index + 1]
             val absoluteEnd = if (
                 nextPhrase != null &&
@@ -607,7 +667,8 @@ private fun highlightedPage(
             } else {
                 phrase.end
             }
-            val phraseEnd = absoluteEnd.coerceIn(page.start, page.end) - page.start
+            val phraseEnd = includeAdjacentClosingQuotes(text, absoluteEnd)
+                .coerceIn(page.start, page.end) - page.start
             if (phraseEnd > phraseStart) {
                 addStyle(
                     style = SpanStyle(
@@ -650,9 +711,27 @@ internal fun speakerHighlightColor(
 private fun stableColorSlot(speakerId: String): Int =
     speakerId.hashCode() and Int.MAX_VALUE
 
-private const val MAX_LEGEND_SPEAKERS = 32
+private fun includeAdjacentOpeningQuotes(
+    text: String,
+    start: Int,
+): Int {
+    var result = start.coerceIn(0, text.length)
+    while (result > 0 && text[result - 1] in BOOK_QUOTE_MARKS) result--
+    return result
+}
+
+private fun includeAdjacentClosingQuotes(
+    text: String,
+    end: Int,
+): Int {
+    var result = end.coerceIn(0, text.length)
+    while (result < text.length && text[result] in BOOK_QUOTE_MARKS) result++
+    return result
+}
+
 private const val COMPLETE_CACHE_THRESHOLD = 0.999f
 private const val GOLDEN_ANGLE_DEGREES = 137.50776f
+private val BOOK_QUOTE_MARKS = setOf('"', '\u201c', '\u201d', '\u201e', '\u00ab', '\u00bb')
 
 private fun formatCoverage(coverage: Float): String {
     val percentage = coverage.coerceIn(0f, 1f) * 100f
@@ -696,68 +775,249 @@ private fun ReaderHeader(
 @Composable
 private fun SpeechControls(
     playbackState: PlaybackState,
+    playbackSpeed: Float,
     onPrevious: () -> Unit,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
+    onSetPlaybackSpeed: (Float) -> Unit,
 ) {
-    Row(
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
+    var showSpeedDialog by remember { mutableStateOf(false) }
+    var draftSpeed by remember(playbackSpeed) { mutableStateOf(playbackSpeed) }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
-            .height(62.dp)
-            .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 16.dp),
+            .background(MaterialTheme.colorScheme.surface),
     ) {
-        IconButton(onClick = onPrevious) {
-            Icon(Icons.Default.SkipPrevious, contentDescription = "Previous sentence")
+        TextButton(
+            onClick = {
+                draftSpeed = playbackSpeed
+                showSpeedDialog = true
+            },
+        ) {
+            Text("Playback speed  ${formatMultiplier(playbackSpeed)}")
         }
-        Spacer(Modifier.size(22.dp))
-        when (playbackState) {
-            PlaybackState.PREPARING -> {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(48.dp),
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(32.dp),
-                        strokeWidth = 3.dp,
-                    )
-                }
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(62.dp)
+                .padding(horizontal = 16.dp),
+        ) {
+            IconButton(onClick = onPrevious) {
+                Icon(Icons.Default.SkipPrevious, contentDescription = "Previous sentence")
             }
+            Spacer(Modifier.size(22.dp))
+            when (playbackState) {
+                PlaybackState.PREPARING -> {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(32.dp),
+                            strokeWidth = 3.dp,
+                        )
+                    }
+                }
 
-            PlaybackState.PLAYING -> {
-                IconButton(
-                    onClick = onPlayPause,
-                    modifier = Modifier.size(48.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Pause,
-                        contentDescription = "Pause",
-                        modifier = Modifier.size(32.dp),
-                    )
+                PlaybackState.PLAYING -> {
+                    IconButton(
+                        onClick = onPlayPause,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Pause,
+                            contentDescription = "Pause",
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
                 }
-            }
 
-            else -> {
-                IconButton(
-                    onClick = onPlayPause,
-                    modifier = Modifier.size(48.dp),
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = "Play",
-                        modifier = Modifier.size(34.dp),
-                    )
+                else -> {
+                    IconButton(
+                        onClick = onPlayPause,
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            modifier = Modifier.size(34.dp),
+                        )
+                    }
                 }
             }
-        }
-        Spacer(Modifier.size(22.dp))
-        IconButton(onClick = onNext) {
-            Icon(Icons.Default.SkipNext, contentDescription = "Next sentence")
+            Spacer(Modifier.size(22.dp))
+            IconButton(onClick = onNext) {
+                Icon(Icons.Default.SkipNext, contentDescription = "Next sentence")
+            }
         }
     }
+
+    if (showSpeedDialog) {
+        AlertDialog(
+            onDismissRequest = { showSpeedDialog = false },
+            title = { Text("Playback speed") },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = formatMultiplier(draftSpeed),
+                        style = MaterialTheme.typography.headlineMedium,
+                    )
+                    Slider(
+                        value = draftSpeed,
+                        onValueChange = { draftSpeed = snapToTenth(it) },
+                        valueRange = 0.5f..2f,
+                        steps = 14,
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("0.5×")
+                        Text("2.0×")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onSetPlaybackSpeed(draftSpeed)
+                        showSpeedDialog = false
+                    },
+                ) {
+                    Text("Apply")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSpeedDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
+    }
 }
+
+@Composable
+private fun CharacterVoiceDialog(
+    profile: CharacterProfile,
+    onDismiss: () -> Unit,
+    onSave: (CharacterProfile) -> Unit,
+) {
+    var voiceGroup by remember(profile.id, profile.voiceGroup) {
+        mutableStateOf(profile.voiceGroup)
+    }
+    var voiceSlot by remember(profile.id, profile.voiceSlot) {
+        mutableStateOf(profile.voiceSlot.toFloat())
+    }
+    var pitch by remember(profile.id, profile.pitch) {
+        mutableStateOf(profile.pitch)
+    }
+    var speechRate by remember(profile.id, profile.speechRate) {
+        mutableStateOf(profile.speechRate)
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${profile.displayName} voice") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Text("Voice family", style = MaterialTheme.typography.labelLarge)
+                VoiceGroup.entries.forEach { option ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { voiceGroup = option },
+                    ) {
+                        RadioButton(
+                            selected = voiceGroup == option,
+                            onClick = { voiceGroup = option },
+                        )
+                        Text(option.name.lowercase().replaceFirstChar(Char::uppercase))
+                    }
+                }
+                Spacer(Modifier.height(10.dp))
+                VoiceSliderLabel("Voice variation", voiceSlot.roundToInt().toString())
+                Slider(
+                    value = voiceSlot,
+                    onValueChange = { voiceSlot = it.roundToInt().toFloat() },
+                    valueRange = 0f..7f,
+                    steps = 6,
+                )
+                VoiceSliderLabel("Pitch", formatDecimal(pitch))
+                Slider(
+                    value = pitch,
+                    onValueChange = { pitch = snapToTenth(it) },
+                    valueRange = 0.5f..1.6f,
+                    steps = 10,
+                )
+                VoiceSliderLabel("Base speaking rate", formatMultiplier(speechRate))
+                Slider(
+                    value = speechRate,
+                    onValueChange = { speechRate = snapToTenth(it) },
+                    valueRange = 0.5f..1.5f,
+                    steps = 9,
+                )
+                Text(
+                    text = "Book playback speed and phrase emotion are applied on top of these values.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        profile.copy(
+                            voiceGroup = voiceGroup,
+                            voiceSlot = voiceSlot.roundToInt(),
+                            pitch = pitch,
+                            speechRate = speechRate,
+                        ),
+                    )
+                },
+            ) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        },
+    )
+}
+
+@Composable
+private fun VoiceSliderLabel(
+    label: String,
+    value: String,
+) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+        Text(value, color = MaterialTheme.colorScheme.primary)
+    }
+}
+
+private fun formatMultiplier(value: Float): String =
+    "${formatDecimal(value)}×"
+
+private fun formatDecimal(value: Float): String =
+    String.format(Locale.ROOT, "%.1f", value)
+
+private fun snapToTenth(value: Float): Float =
+    (value * 10f).roundToInt() / 10f
 
 @Composable
 private fun LoadingScreen() {

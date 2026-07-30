@@ -100,6 +100,8 @@ class MainActivity : ComponentActivity() {
                                 ),
                             )
                         },
+                        onSetPlaybackSpeed = viewModel::setPlaybackSpeed,
+                        onUpdateCharacterVoice = viewModel::updateCharacterVoice,
                         onDismissError = viewModel::dismissError,
                     )
                 }

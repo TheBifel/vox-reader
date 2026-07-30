@@ -1,6 +1,8 @@
 package com.bifel.voxreader.domain.preanalysis.sidecar
 
 import com.bifel.voxreader.domain.model.SpeechPhrase
+import com.bifel.voxreader.domain.model.EmotionType
+import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
 import com.bifel.voxreader.domain.preanalysis.model.AnalysisRunId
 import com.bifel.voxreader.domain.preanalysis.model.AttributionSource
@@ -145,7 +147,7 @@ class AnalysisSidecarJsonTest {
     }
 
     @Test
-    fun `decodes and ignores optional emotion data`() {
+    fun `round trips optional emotion data`() {
         val phrase = SpeechPhrase(0, 0, 6, "\"Run!\"")
         val manifest = PhraseManifestBuilder.build("book-id", listOf(phrase))
         val bundle = AnalysisSidecarBundle(
@@ -160,18 +162,20 @@ class AnalysisSidecarJsonTest {
                     speakerName = "Alice",
                     voiceGroup = VoiceGroup.FEMALE,
                     source = AttributionSource.PREANALYSIS_CACHE,
+                    emotion = PhraseEmotion(
+                        type = EmotionType.FEAR,
+                        intensity = 0.7f,
+                        confidence = 0.9f,
+                    ),
                 ),
             ),
         )
-        val withEmotion = AnalysisSidecarJson.encode(bundle).replace(
-            "\"source\": \"PREANALYSIS_CACHE\"",
-            "\"source\": \"PREANALYSIS_CACHE\",\n" +
-                "            \"emotion\": {\"type\":\"FEAR\",\"intensity\":0.7,\"confidence\":0.9}",
-        )
+        val withEmotion = AnalysisSidecarJson.encode(bundle)
 
         val decoded = AnalysisSidecarJson.decode(withEmotion)
 
         assertEquals(bundle, decoded)
+        assertEquals(EmotionType.FEAR, decoded.rows.single().emotion?.type)
         assertTrue(decoded.validateAgainst("book-id", phrase.text).isEmpty())
     }
 }

@@ -61,7 +61,12 @@ The file is a UTF-8 JSON object with versioned metadata and a `phrases` array:
       "speech_rate": 1.0,
       "confidence": 0.99,
       "evidence": "CONTEXTUAL",
-      "source": "PREANALYSIS_CACHE"
+      "source": "PREANALYSIS_CACHE",
+      "emotion": {
+        "type": "EXCITEMENT",
+        "intensity": 0.7,
+        "confidence": 0.91
+      }
     }
   ]
 }
@@ -104,10 +109,20 @@ VoxReader rejects unsupported or mismatched versions.
 | `confidence` | Yes | Attribution confidence in `0..1`. |
 | `evidence` | Yes | Why the assignment was made. |
 | `source` | Yes | Where the assignment came from. |
-| `emotion` | Later | Optional future voice-delivery data; currently accepted and ignored. |
+| `emotion` | Yes | Optional object containing `type`, `intensity`, and `confidence`. |
 
 Use `unknown`, `Unknown`, `NEUTRAL`, and confidence `0` for unresolved phrases. Unknown objects
 remain authoritative cached decisions but are intentionally displayed without a speaker color.
+
+Emotion `intensity` is in `0..1`, and emotion `confidence` must be in `0.85..1`. The accepted
+emotion types are `JOY`, `SADNESS`, `ANGER`, `FEAR`, `SURPRISE`, `DISGUST`, `TENSION`,
+`EXCITEMENT`, `CURIOSITY`, `CONFIDENCE`, `AFFECTION`, `SHAME`, `GRIEF`, `AMUSEMENT`,
+`FRUSTRATION`, `RELIEF`, and `DETERMINATION`.
+
+The current Android TTS proof of concept applies audible delivery changes to `ANGER`, `SADNESS`,
+`EXCITEMENT`, and `FEAR`. It interpolates pitch, speaking rate, and the pause after the phrase
+using `intensity`; the remaining accepted types currently use neutral delivery. The emotion field
+is preserved in Room and when the analysis is exported again.
 
 ## Identity and attribution rules
 

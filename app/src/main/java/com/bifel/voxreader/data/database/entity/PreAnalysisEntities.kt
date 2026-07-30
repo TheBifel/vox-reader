@@ -68,6 +68,9 @@ data class PhraseAttributionEntity(
     val confidence: Float,
     val source: String,
     val evidence: String,
+    val emotionType: String?,
+    val emotionIntensity: Float?,
+    val emotionConfidence: Float?,
     val createdAt: Long,
 )
 

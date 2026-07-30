@@ -2,6 +2,8 @@ package com.bifel.voxreader.domain.preanalysis.sidecar
 
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
+import com.bifel.voxreader.domain.model.EmotionType
+import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.VoiceGroup
@@ -20,7 +22,6 @@ import com.bifel.voxreader.domain.preanalysis.model.SpeakerAttribution
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 
 data class AnalysisSidecarMetadata(
     val bookId: String,
@@ -49,6 +50,7 @@ data class AnalysisSidecarRow(
     val confidence: Float,
     val evidence: EvidenceKind,
     val source: AttributionSource,
+    val emotion: PhraseEmotion? = null,
 )
 
 data class AnalysisSidecarBundle(
@@ -120,6 +122,14 @@ data class AnalysisSidecarBundle(
                 errors += "$label has speech_rate outside 0.5..1.5."
             }
             if (row.voiceSlot < 0) errors += "$label has a negative voice_slot."
+            row.emotion?.let { emotion ->
+                if (!emotion.intensity.isFinite() || emotion.intensity !in 0f..1f) {
+                    errors += "$label has emotion intensity outside 0..1."
+                }
+                if (!emotion.confidence.isFinite() || emotion.confidence !in 0.85f..1f) {
+                    errors += "$label has emotion confidence outside 0.85..1."
+                }
+            }
 
             val expected = expectedManifest[rowIndex]
             if (expected.phraseId != row.phraseId ||
@@ -202,6 +212,7 @@ data class AnalysisSidecarBundle(
                 confidence = row.confidence,
                 source = row.source,
                 evidence = row.evidence,
+                emotion = row.emotion,
             )
         }
         return ProviderBookResult(
@@ -277,6 +288,13 @@ object AnalysisSidecarJson {
             confidence = confidence,
             evidence = evidence.name,
             source = source.name,
+            emotion = emotion?.let {
+                SidecarEmotion(
+                    type = it.type.name,
+                    intensity = it.intensity,
+                    confidence = it.confidence,
+                )
+            },
         )
 
     private fun SidecarDocument.toBundle() =
@@ -311,6 +329,13 @@ object AnalysisSidecarJson {
             confidence = confidence,
             evidence = evidence.requiredEnum("evidence", index),
             source = source.requiredEnum("source", index),
+            emotion = emotion?.let {
+                PhraseEmotion(
+                    type = it.type.requiredEnum<EmotionType>("emotion.type", index),
+                    intensity = it.intensity,
+                    confidence = it.confidence,
+                )
+            },
         )
 
     private inline fun <reified T : Enum<T>> String.requiredEnum(
@@ -347,6 +372,7 @@ fun unknownSidecarRow(
         confidence = 0f,
         evidence = EvidenceKind.UNKNOWN,
         source = AttributionSource.UNKNOWN,
+        emotion = null,
     )
 
 fun narratorSidecarRow(
@@ -409,5 +435,12 @@ private data class SidecarPhrase(
     val confidence: Float,
     val evidence: String,
     val source: String,
-    val emotion: JsonElement? = null,
+    val emotion: SidecarEmotion? = null,
+)
+
+@Serializable
+private data class SidecarEmotion(
+    val type: String,
+    val intensity: Float,
+    val confidence: Float,
 )

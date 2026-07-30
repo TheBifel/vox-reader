@@ -7,6 +7,8 @@ import com.bifel.voxreader.data.database.entity.CharacterEntity
 import com.bifel.voxreader.data.database.entity.PhraseAttributionEntity
 import com.bifel.voxreader.data.database.entity.PhraseManifestEntity
 import com.bifel.voxreader.domain.model.CharacterProfile
+import com.bifel.voxreader.domain.model.EmotionType
+import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.preanalysis.AttributionRepository
 import com.bifel.voxreader.domain.preanalysis.CharacterRegistryRepository
@@ -284,6 +286,9 @@ class RoomPreAnalysisStore(
         confidence = confidence,
         source = source.name,
         evidence = evidence.name,
+        emotionType = emotion?.type?.name,
+        emotionIntensity = emotion?.intensity,
+        emotionConfidence = emotion?.confidence,
         createdAt = createdAt,
     )
 
@@ -294,6 +299,17 @@ class RoomPreAnalysisStore(
             confidence = confidence,
             source = enumValueOrDefault(source, AttributionSource.UNKNOWN),
             evidence = enumValueOrDefault(evidence, EvidenceKind.UNKNOWN),
+            emotion = emotionType?.let { type ->
+                val intensity = emotionIntensity ?: return@let null
+                val confidence = emotionConfidence ?: return@let null
+                val emotion = runCatching { EmotionType.valueOf(type) }.getOrNull()
+                    ?: return@let null
+                PhraseEmotion(
+                    type = emotion,
+                    intensity = intensity,
+                    confidence = confidence,
+                )
+            },
         )
 
     private fun CharacterProfile.toEntity(bookId: String, runId: String) =

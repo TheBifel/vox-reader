@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bifel.voxreader.data.database.dao.AnalysisRunDao
 import com.bifel.voxreader.data.database.dao.CharacterDao
 import com.bifel.voxreader.data.database.dao.PhraseAttributionDao
@@ -20,7 +22,7 @@ import com.bifel.voxreader.data.database.entity.PhraseManifestEntity
         PhraseAttributionEntity::class,
         CharacterEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class VoxReaderDatabase : RoomDatabase() {
@@ -35,6 +37,16 @@ abstract class VoxReaderDatabase : RoomDatabase() {
                 context.applicationContext,
                 VoxReaderDatabase::class.java,
                 "voxreader-attribution.db",
-            ).build()
+            )
+                .addMigrations(MIGRATION_1_2)
+                .build()
+
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE phrase_attribution ADD COLUMN emotionType TEXT")
+                db.execSQL("ALTER TABLE phrase_attribution ADD COLUMN emotionIntensity REAL")
+                db.execSQL("ALTER TABLE phrase_attribution ADD COLUMN emotionConfidence REAL")
+            }
+        }
     }
 }

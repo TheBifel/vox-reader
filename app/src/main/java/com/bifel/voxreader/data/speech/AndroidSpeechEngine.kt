@@ -95,7 +95,7 @@ class AndroidSpeechEngine(
             }
         }
         textToSpeech.setPitch(request.pitch.coerceIn(0.5f, 1.6f))
-        textToSpeech.setSpeechRate(request.speechRate.coerceIn(0.6f, 1.5f))
+        textToSpeech.setSpeechRate(request.speechRate.coerceIn(0.5f, 2f))
 
         val result = textToSpeech.speak(
             request.text,

@@ -17,7 +17,7 @@ The proof of concept deliberately avoids voice cloning, cloud services, accounts
 inference. It uses deterministic dialogue rules plus a bundled, task-specific TinyBERT classifier
 on the phone, then uses voices already available in Android's local text-to-speech engine.
 Characters are differentiated through deterministic voice selection, pitch, and speaking-rate
-profiles.
+profiles. Imported phrase emotions can temporarily modify that profile while a phrase is spoken.
 
 The long-term goal is a private audiobook-like reading experience that:
 
@@ -62,8 +62,10 @@ book's total extracted text.
 The drawer contains:
 
 - a dark/light reader theme switch; and
-- a command to enable or hide text-to-speech controls; and
-- the active offline attribution engine and last-analysis status.
+- a command to enable or hide text-to-speech controls;
+- the active offline attribution engine and last-analysis status; and
+- an editable Narrator and character list with voice group, variation, pitch, and base-rate
+  controls.
 
 The drawer closes by tapping its shaded outside area, swiping it away, or pressing Android Back.
 
@@ -71,15 +73,18 @@ The dark theme uses a near-black background and warm white text. The light theme
 relationship with a warm paper background and dark text.
 
 When speech controls are enabled, previous-sentence, play/pause, and next-sentence controls appear
-above the reading progress bar. Pressing play starts from the first sentence visible on the
-current page. During initial speech preparation, the play button becomes a loader. This loader
-represents real work: TinyBERT initialization/inference when rules cannot resolve an ambiguous
-speaker, character analysis, and Android TTS initialization.
+above the reading progress bar. A speed control above them adjusts global playback from `0.5x` to
+`2.0x` and is remembered across launches. Pressing play starts from the first speakable sentence
+visible on the current page. During initial speech preparation, the play button becomes a loader.
+This loader represents character-data preparation and Android TTS initialization.
 
 While speaking, Android's range callbacks update the highlighted text. When the spoken range moves
 outside the current page, the reader automatically lays out and displays the page containing that
 range. If an installed TTS engine does not provide word/range timings, the whole active sentence is
-highlighted as a fallback.
+highlighted as a fallback. Quote glyphs remain visually attached to their cached character's
+highlight, but punctuation-only fragments and decorative separators are skipped instead of being
+sent to TTS. Quote glyphs are removed from the synthesized text without changing offsets, which
+prevents some Android voices from announcing them as “quote.”
 
 ## High-level processing flow
 
@@ -101,9 +106,10 @@ flowchart LR
     L -->|Low confidence or error| M
     N --> O["Reuse persistent character profile"]
     M --> O
-    O --> P["Choose offline Android voice, pitch, and rate"]
-    P --> Q["Speak one sentence"]
-    Q --> R["Highlight TTS range and preselect next sentence"]
+    O --> P["Choose offline Android voice and saved profile"]
+    P --> Q["Apply global speed and optional phrase emotion"]
+    Q --> S["Speak one sentence"]
+    S --> R["Highlight TTS range and preselect next sentence"]
     R --> Q
 ```
 
@@ -197,7 +203,8 @@ Jetpack Preferences DataStore is the durable source for:
 - imported-book metadata;
 - the latest book ID;
 - page start/end character offsets; and
-- per-book character names and voice profiles.
+- global playback speed; and
+- per-book Narrator/character voice overrides.
 
 Book text is not duplicated inside DataStore. EPUB files live under the app's private `files/books`
 directory and are named by a SHA-256 digest. Reopening the same source therefore reuses the stored
@@ -245,6 +252,13 @@ version changes neutralize old uncertain profiles before they are grounded again
 - emits start, range, completion, stop, and error events; and
 - uses range offsets to synchronize highlighting.
 
+The final TTS pitch and rate are composed from the saved character profile, the global playback
+speed, and the imported phrase emotion. For the current POC, anger is faster and slightly lower,
+sadness is slower and lower with a longer pause, excitement is faster and slightly higher, and
+fear is faster and higher with a shorter pause. Emotion intensity controls how far the delivery
+moves away from neutral. User-edited voice settings are kept separately from the imported JSON,
+so reimporting an updated analysis does not erase those choices.
+
 Speech is generated in real time. The next sentence starts after the current completion callback.
 Pausing stops the current synthesis; resuming restarts the selected sentence because Android's
 standard TTS API does not expose sample-accurate pause/resume.
@@ -256,8 +270,6 @@ standard TTS API does not expose sample-accurate pause/resume.
 - Validate more EPUB variants and malformed files.
 - Add instrumentation tests for file intents and TTS callback handling.
 - Add font size, margins, and line-spacing controls.
-- Add a small voice-assignment screen because Android voice names do not expose reliable gender
-  metadata.
 - Improve long-sentence and nested-quotation handling.
 
 ### On-device intelligence hardening

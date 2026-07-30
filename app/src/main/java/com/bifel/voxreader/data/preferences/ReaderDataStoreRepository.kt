@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.bifel.voxreader.domain.model.BookDocument
@@ -46,6 +47,7 @@ class ReaderDataStoreRepository(
         ReaderSettings(
             darkTheme = preferences[Keys.DarkTheme] ?: true,
             speechControlsEnabled = preferences[Keys.SpeechControls] ?: false,
+            playbackSpeed = (preferences[Keys.PlaybackSpeed] ?: 1f).coerceIn(0.5f, 2f),
         )
     }
 
@@ -104,12 +106,28 @@ class ReaderDataStoreRepository(
         }
     }
 
+    override suspend fun updateVoiceOverride(
+        bookId: String,
+        profile: CharacterProfile,
+    ) {
+        updateBook(bookId) { book ->
+            book.copy(
+                voiceOverrides = book.voiceOverrides
+                    .filterNot { it.id == profile.id } + profile,
+            )
+        }
+    }
+
     override suspend fun setDarkTheme(enabled: Boolean) {
         dataStore.edit { it[Keys.DarkTheme] = enabled }
     }
 
     override suspend fun setSpeechControlsEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.SpeechControls] = enabled }
+    }
+
+    override suspend fun setPlaybackSpeed(speed: Float) {
+        dataStore.edit { it[Keys.PlaybackSpeed] = speed.coerceIn(0.5f, 2f) }
     }
 
     private suspend fun updateBook(
@@ -159,6 +177,12 @@ class ReaderDataStoreRepository(
                 characters.forEach { put(it.toJson()) }
             },
         )
+        put(
+            "voiceOverrides",
+            JSONArray().apply {
+                voiceOverrides.forEach { put(it.toJson()) }
+            },
+        )
     }
 
     private fun CharacterProfile.toJson(): JSONObject = JSONObject().apply {
@@ -178,6 +202,12 @@ class ReaderDataStoreRepository(
                 add(characterArray.getJSONObject(index).toCharacterProfile())
             }
         }
+        val overrideArray = optJSONArray("voiceOverrides") ?: JSONArray()
+        val voiceOverrides = buildList {
+            for (index in 0 until overrideArray.length()) {
+                add(overrideArray.getJSONObject(index).toCharacterProfile())
+            }
+        }
         val attributionVersion = optInt("characterAttributionVersion", 0)
         val characters = if (attributionVersion < CURRENT_CHARACTER_ATTRIBUTION_VERSION) {
             decodedCharacters
@@ -192,6 +222,7 @@ class ReaderDataStoreRepository(
             readingPosition = optInt("readingPosition", 0),
             pageEndPosition = optInt("pageEndPosition", 0),
             characters = characters,
+            voiceOverrides = voiceOverrides,
             characterAttributionVersion = attributionVersion,
             lastOpenedAt = optLong("lastOpenedAt", 0L),
         )
@@ -221,6 +252,7 @@ class ReaderDataStoreRepository(
     private object Keys {
         val DarkTheme = booleanPreferencesKey("dark_theme")
         val SpeechControls = booleanPreferencesKey("speech_controls")
+        val PlaybackSpeed = floatPreferencesKey("playback_speed")
         val LatestBookId = stringPreferencesKey("latest_book_id")
         val Books = stringPreferencesKey("books_json")
     }

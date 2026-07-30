@@ -14,6 +14,7 @@ data class StoredBook(
     val readingPosition: Int = 0,
     val pageEndPosition: Int = 0,
     val characters: List<CharacterProfile> = emptyList(),
+    val voiceOverrides: List<CharacterProfile> = emptyList(),
     val characterAttributionVersion: Int = 0,
     val lastOpenedAt: Long = System.currentTimeMillis(),
 )
@@ -30,6 +31,7 @@ data class LibraryState(
 data class ReaderSettings(
     val darkTheme: Boolean = true,
     val speechControlsEnabled: Boolean = false,
+    val playbackSpeed: Float = 1f,
 )
 
 enum class VoiceGroup {

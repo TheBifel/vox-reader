@@ -4,6 +4,7 @@ import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.NarratorProfile
+import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
@@ -62,6 +63,7 @@ class PortableAnalysisService(
                     confidence = attribution.confidence,
                     evidence = attribution.evidence,
                     source = attribution.source,
+                    emotion = attribution.emotion,
                 )
             }
         }
@@ -142,6 +144,9 @@ class PortableAnalysisService(
         val attributionByIndex = manifest.mapNotNull { item ->
             attributions[item.phraseId]?.let { item.phraseIndex to it }
         }.toMap()
+        val emotionsByPhraseIndex = attributionByIndex.mapNotNull { (index, attribution) ->
+            attribution.emotion?.let { index to it }
+        }.toMap()
         val resolvedPhrases = basePhrases.map { phrase ->
             phrase.copy(
                 speakerId = attributionByIndex[phrase.index]?.characterId ?: phrase.speakerId,
@@ -155,8 +160,21 @@ class PortableAnalysisService(
             phrases = resolvedPhrases,
             characters = characters,
             cachedPhraseIndices = attributionByIndex.keys,
+            emotionsByPhraseIndex = emotionsByPhraseIndex,
             providerId = revision.providerId,
             coverage = revision.coverage,
+        )
+    }
+
+    suspend fun updateVoiceProfile(
+        bookId: String,
+        profile: CharacterProfile,
+    ) {
+        val revision = store.observeActiveRevision(bookId).first() ?: return
+        store.upsertCharacters(
+            bookId = bookId,
+            runId = revision.runId,
+            characters = listOf(profile),
         )
     }
 
@@ -171,6 +189,7 @@ class PortableAnalysisService(
         val phrases: List<SpeechPhrase>,
         val characters: List<CharacterProfile>,
         val cachedPhraseIndices: Set<Int>,
+        val emotionsByPhraseIndex: Map<Int, PhraseEmotion>,
         val providerId: String?,
         val coverage: Float,
     ) {
@@ -180,6 +199,7 @@ class PortableAnalysisService(
                     phrases = phrases,
                     characters = emptyList(),
                     cachedPhraseIndices = emptySet(),
+                    emotionsByPhraseIndex = emptyMap(),
                     providerId = null,
                     coverage = 0f,
                 )

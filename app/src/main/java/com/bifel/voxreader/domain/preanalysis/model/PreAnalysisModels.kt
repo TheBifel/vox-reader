@@ -1,6 +1,7 @@
 package com.bifel.voxreader.domain.preanalysis.model
 
 import com.bifel.voxreader.domain.model.CharacterProfile
+import com.bifel.voxreader.domain.model.PhraseEmotion
 
 @JvmInline
 value class PhraseId(val value: String)
@@ -120,6 +121,7 @@ data class SpeakerAttribution(
     val confidence: Float,
     val source: AttributionSource,
     val evidence: EvidenceKind,
+    val emotion: PhraseEmotion? = null,
 )
 
 data class AttributionRevision(
