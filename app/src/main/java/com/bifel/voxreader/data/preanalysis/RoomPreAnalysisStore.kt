@@ -153,6 +153,26 @@ class RoomPreAnalysisStore(
         }
     }
 
+    suspend fun activateRevisionWithManifest(
+        runId: AnalysisRunId,
+        manifest: List<PhraseManifestItem>,
+    ) {
+        database.withTransaction {
+            val run = requireNotNull(runDao.find(runId.value)) {
+                "Unknown analysis run ${runId.value}"
+            }
+            val status = run.status.toRunStatus()
+            require(status == AnalysisRunStatus.READY || status == AnalysisRunStatus.PARTIAL) {
+                "Only a validated READY or PARTIAL revision can be activated."
+            }
+            manifestDao.deleteForBook(run.bookId)
+            manifestDao.upsert(manifest.map { it.toEntity(run.bookId) })
+            val now = clock()
+            runDao.deactivateBook(run.bookId, now)
+            runDao.activate(run.runId, now)
+        }
+    }
+
     override suspend fun characters(
         bookId: String,
         runId: AnalysisRunId?,

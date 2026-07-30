@@ -5,18 +5,20 @@ import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.NarratorProfile
 import com.bifel.voxreader.domain.model.SpeechPhrase
+import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
+import com.bifel.voxreader.domain.preanalysis.model.PhraseManifestItem
 import com.bifel.voxreader.domain.preanalysis.model.PreAnalysisRequest
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarBundle
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarMetadata
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarRow
-import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarTsv
+import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarJson
 import com.bifel.voxreader.domain.preanalysis.sidecar.unknownSidecarRow
 import kotlinx.coroutines.flow.first
 
 /**
  * The application boundary shared by manual files, desktop/cloud processing, and the future
- * overnight provider. Every producer ultimately imports the same validated TSV revision.
+ * overnight provider. Every producer ultimately imports the same validated JSON revision.
  */
 class PortableAnalysisService(
     private val store: RoomPreAnalysisStore,
@@ -63,7 +65,7 @@ class PortableAnalysisService(
                 )
             }
         }
-        return AnalysisSidecarTsv.encode(
+        return AnalysisSidecarJson.encode(
             AnalysisSidecarBundle(
                 metadata = AnalysisSidecarMetadata(
                     bookId = book.id,
@@ -77,19 +79,12 @@ class PortableAnalysisService(
 
     suspend fun import(
         book: BookDocument,
-        phrases: List<SpeechPhrase>,
         content: String,
     ): ImportedAnalysis {
-        val bundle = AnalysisSidecarTsv.decode(content)
-        val manifest = PhraseManifestBuilder.build(book.id, phrases)
-        val textByIndex = phrases.associateBy(SpeechPhrase::index)
-        val textByPhraseId = manifest.associate { item ->
-            item.phraseId to textByIndex[item.phraseIndex]?.text.orEmpty()
-        }
+        val bundle = AnalysisSidecarJson.decode(content)
         val errors = bundle.validateAgainst(
             bookId = book.id,
-            manifest = manifest,
-            textByPhraseId = textByPhraseId,
+            bookText = book.text,
         )
         require(errors.isEmpty()) {
             errors.take(MAX_REPORTED_ERRORS).joinToString(
@@ -97,6 +92,7 @@ class PortableAnalysisService(
                 separator = "\n",
             )
         }
+        val manifest = bundle.toManifest()
 
         val runId = store.createRun(
             PreAnalysisRequest(
@@ -105,7 +101,6 @@ class PortableAnalysisService(
                 replaceExisting = true,
             ),
         )
-        store.replaceManifest(book.id, manifest)
         store.prepareRun(
             runId = runId,
             totalPhrases = manifest.size,
@@ -117,13 +112,15 @@ class PortableAnalysisService(
             attributions = result.attributions,
             characters = result.characters,
         )
-        store.activateRevision(runId)
+        store.activateRevisionWithManifest(runId, manifest)
 
         return ImportedAnalysis(
             providerId = bundle.metadata.providerId,
             totalPhrases = manifest.size,
             attributedPhrases = result.attributions.size,
-            characterCount = result.characters.count { it.id != NARRATOR_ID },
+            characterCount = result.characters.count {
+                it.id != NARRATOR_ID && it.id != UNKNOWN_SPEAKER_ID
+            },
         )
     }
 
@@ -133,12 +130,19 @@ class PortableAnalysisService(
     ): CachedAnalysis {
         val revision = store.observeActiveRevision(book.id).first()
             ?: return CachedAnalysis.empty(phrases)
-        val manifest = PhraseManifestBuilder.build(book.id, phrases)
+        val storedManifest = store.manifest(book.id)
+        val storedPhrases = storedManifest.toSpeechPhrases(book.text)
+        val manifest = if (storedPhrases != null) {
+            storedManifest
+        } else {
+            PhraseManifestBuilder.build(book.id, phrases)
+        }
+        val basePhrases = storedPhrases ?: phrases
         val attributions = store.activeAttributions(book.id)
         val attributionByIndex = manifest.mapNotNull { item ->
             attributions[item.phraseId]?.let { item.phraseIndex to it }
         }.toMap()
-        val resolvedPhrases = phrases.map { phrase ->
+        val resolvedPhrases = basePhrases.map { phrase ->
             phrase.copy(
                 speakerId = attributionByIndex[phrase.index]?.characterId ?: phrase.speakerId,
             )
@@ -186,4 +190,30 @@ class PortableAnalysisService(
         const val TEMPLATE_PROVIDER_ID = "unassigned-template"
         const val MAX_REPORTED_ERRORS = 8
     }
+}
+
+private fun List<PhraseManifestItem>.toSpeechPhrases(
+    bookText: String,
+): List<SpeechPhrase>? {
+    if (isEmpty()) return null
+    val phrases = ArrayList<SpeechPhrase>(size)
+    var previousEnd = 0
+    forEachIndexed { index, item ->
+        if (item.phraseIndex != index ||
+            item.start < previousEnd ||
+            item.start < 0 ||
+            item.end <= item.start ||
+            item.end > bookText.length
+        ) {
+            return null
+        }
+        phrases += SpeechPhrase(
+            index = item.phraseIndex,
+            start = item.start,
+            end = item.end,
+            text = bookText.substring(item.start, item.end),
+        )
+        previousEnd = item.end
+    }
+    return phrases
 }

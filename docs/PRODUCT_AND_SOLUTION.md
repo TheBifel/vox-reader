@@ -1,8 +1,10 @@
 # VoxReader: product and high-level solution
 
 The whole-book speaker-analysis exchange format is documented in
-[`SPEAKER_ANALYSIS_TSV.md`](SPEAKER_ANALYSIS_TSV.md). It is the shared contract for manual,
-cloud/outsourced, desktop, and future overnight analysis.
+[`SPEAKER_ANALYSIS_JSON.md`](SPEAKER_ANALYSIS_JSON.md). It is the shared contract for manual,
+cloud/outsourced, desktop, and future overnight analysis. Once imported, its phrase manifest and
+speaker decisions are authoritative: the reader displays cached character colors and does not run
+live attribution for that manifest.
 
 ## What the app does
 

@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val exportAnalysisLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("text/tab-separated-values"),
+        ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
         uri ?: return@registerForActivityResult
         lifecycleScope.launch {
@@ -89,14 +89,13 @@ class MainActivity : ComponentActivity() {
                         onNextPhrase = viewModel::nextPhrase,
                         onPageChanged = viewModel::onPageChanged,
                         onExportAnalysis = {
-                            exportAnalysisLauncher.launch("voxreader-speaker-analysis.tsv")
+                            exportAnalysisLauncher.launch("voxreader-speaker-analysis.json")
                         },
                         onImportAnalysis = {
                             importAnalysisLauncher.launch(
                                 arrayOf(
-                                    "text/tab-separated-values",
-                                    "text/plain",
-                                    "text/*",
+                                    "application/json",
+                                    "text/json",
                                     "application/octet-stream",
                                 ),
                             )

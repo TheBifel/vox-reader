@@ -199,7 +199,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             runCatching {
                 withContext(Dispatchers.Default) {
-                    val result = portableAnalysisService.import(book, state.phrases, content)
+                    val result = portableAnalysisService.import(book, content)
                     val cached = portableAnalysisService.cached(
                         book = book,
                         phrases = SentenceSegmenter.segment(book.text),
@@ -237,7 +237,7 @@ class ReaderViewModel(
 
     fun analysisFileExported() {
         mutableUiState.update {
-            it.copy(analysisMessage = "Analysis TSV exported. Process it externally, then import it.")
+            it.copy(analysisMessage = "Analysis JSON exported. Process it externally, then import it.")
         }
     }
 

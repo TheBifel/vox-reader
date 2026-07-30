@@ -99,6 +99,16 @@ fun ReaderScreen(
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val speakerColorSlots = remember(state.characters) {
+        state.characters
+            .asSequence()
+            .filter { it.id != NARRATOR_ID && it.id != UNKNOWN_SPEAKER_ID }
+            .map { it.id }
+            .distinct()
+            .sorted()
+            .mapIndexed { index, speakerId -> speakerId to index }
+            .toMap()
+    }
 
     BackHandler(enabled = drawerState.isOpen) {
         scope.launch { drawerState.close() }
@@ -110,6 +120,7 @@ fun ReaderScreen(
         drawerContent = {
             ReaderDrawer(
                 state = state,
+                speakerColorSlots = speakerColorSlots,
                 onToggleTheme = onToggleTheme,
                 onEnableSpeech = {
                     onEnableSpeech()
@@ -135,6 +146,7 @@ fun ReaderScreen(
             state.book == null -> EmptyLibraryScreen()
             else -> ReaderContent(
                 state = state,
+                speakerColorSlots = speakerColorSlots,
                 onToggleChrome = onToggleChrome,
                 onOpenDrawer = {
                     onHideChrome()
@@ -165,6 +177,7 @@ fun ReaderScreen(
 @Composable
 private fun ReaderDrawer(
     state: ReaderUiState,
+    speakerColorSlots: Map<String, Int>,
     onToggleTheme: () -> Unit,
     onEnableSpeech: () -> Unit,
     onDisableSpeech: () -> Unit,
@@ -234,18 +247,30 @@ private fun ReaderDrawer(
             )
             Spacer(Modifier.height(8.dp))
             ListItem(
-                headlineContent = { Text("TinyBERT dialogue classifier") },
-                supportingContent = {
-                    val source = if (
-                        state.lastAnalysisSource == CharacterAnalysisSource.TINY_BERT
-                    ) {
-                        "TinyBERT"
-                    } else {
-                        "dialogue rules"
-                    }
+                headlineContent = {
                     Text(
-                        "Bundled and fully offline. Last speaker decision used $source.",
+                        if (state.cachedAttributionCoverage >= COMPLETE_CACHE_THRESHOLD) {
+                            "Cached JSON speaker map"
+                        } else {
+                            "TinyBERT dialogue classifier"
+                        },
                     )
+                },
+                supportingContent = {
+                    if (state.cachedAttributionCoverage >= COMPLETE_CACHE_THRESHOLD) {
+                        Text("Authoritative for this book. Live speaker recognition is skipped.")
+                    } else {
+                        val source = if (
+                            state.lastAnalysisSource == CharacterAnalysisSource.TINY_BERT
+                        ) {
+                            "TinyBERT"
+                        } else {
+                            "dialogue rules"
+                        }
+                        Text(
+                            "Bundled and fully offline. Last speaker decision used $source.",
+                        )
+                    }
                 },
                 leadingContent = {
                     Icon(Icons.Default.Psychology, contentDescription = null)
@@ -253,7 +278,7 @@ private fun ReaderDrawer(
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
             ListItem(
-                headlineContent = { Text("Export speaker analysis TSV") },
+                headlineContent = { Text("Export speaker analysis JSON") },
                 supportingContent = {
                     Text("Creates the portable whole-book file for cloud, desktop, or manual editing.")
                 },
@@ -263,7 +288,7 @@ private fun ReaderDrawer(
                 modifier = Modifier.clickable(onClick = onExportAnalysis),
             )
             ListItem(
-                headlineContent = { Text("Import speaker analysis TSV") },
+                headlineContent = { Text("Import speaker analysis JSON") },
                 supportingContent = {
                     Text("Validates and caches assignments for the currently open book.")
                 },
@@ -280,7 +305,7 @@ private fun ReaderDrawer(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
                 )
-                CachedSpeakerLegend(state)
+                CachedSpeakerLegend(state, speakerColorSlots)
             }
             state.analysisMessage?.let { message ->
                 Text(
@@ -296,7 +321,10 @@ private fun ReaderDrawer(
 }
 
 @Composable
-private fun CachedSpeakerLegend(state: ReaderUiState) {
+private fun CachedSpeakerLegend(
+    state: ReaderUiState,
+    speakerColorSlots: Map<String, Int>,
+) {
     val cachedSpeakerIds = state.phrases
         .asSequence()
         .filter { it.index in state.cachedSpeakerPhraseIndices }
@@ -323,7 +351,7 @@ private fun CachedSpeakerLegend(state: ReaderUiState) {
                     .size(18.dp)
                     .background(
                         speakerHighlightColor(
-                            speakerId = character.id,
+                            colorSlot = speakerColorSlots.getValue(character.id),
                             darkTheme = state.darkTheme,
                         ),
                     ),
@@ -340,6 +368,7 @@ private fun CachedSpeakerLegend(state: ReaderUiState) {
 @Composable
 private fun ReaderContent(
     state: ReaderUiState,
+    speakerColorSlots: Map<String, Int>,
     onToggleChrome: () -> Unit,
     onOpenDrawer: () -> Unit,
     onPlayPause: () -> Unit,
@@ -360,6 +389,7 @@ private fun ReaderContent(
                 highlightStart = state.highlightStart,
                 highlightEnd = state.highlightEnd,
                 cachedSpeakerPhraseIndices = state.cachedSpeakerPhraseIndices,
+                speakerColorSlots = speakerColorSlots,
                 darkTheme = state.darkTheme,
                 onToggleChrome = onToggleChrome,
                 onPageChanged = onPageChanged,
@@ -412,6 +442,7 @@ private fun PaginatedBookPage(
     highlightStart: Int?,
     highlightEnd: Int?,
     cachedSpeakerPhraseIndices: Set<Int>,
+    speakerColorSlots: Map<String, Int>,
     darkTheme: Boolean,
     onToggleChrome: () -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
@@ -472,6 +503,7 @@ private fun PaginatedBookPage(
                     page = page,
                     phrases = phrases,
                     cachedSpeakerPhraseIndices = cachedSpeakerPhraseIndices,
+                    speakerColorSlots = speakerColorSlots,
                     darkTheme = darkTheme,
                     highlightStart = highlightStart,
                     highlightEnd = highlightEnd,
@@ -546,6 +578,7 @@ private fun highlightedPage(
     page: PageLayout,
     phrases: List<SpeechPhrase>,
     cachedSpeakerPhraseIndices: Set<Int>,
+    speakerColorSlots: Map<String, Int>,
     darkTheme: Boolean,
     highlightStart: Int?,
     highlightEnd: Int?,
@@ -578,7 +611,11 @@ private fun highlightedPage(
             if (phraseEnd > phraseStart) {
                 addStyle(
                     style = SpanStyle(
-                        background = speakerHighlightColor(phrase.speakerId, darkTheme),
+                        background = speakerHighlightColor(
+                            colorSlot = speakerColorSlots[phrase.speakerId]
+                                ?: stableColorSlot(phrase.speakerId),
+                            darkTheme = darkTheme,
+                        ),
                     ),
                     start = phraseStart,
                     end = phraseEnd,
@@ -601,27 +638,21 @@ private fun highlightedPage(
 }
 
 internal fun speakerHighlightColor(
-    speakerId: String,
+    colorSlot: Int,
     darkTheme: Boolean,
 ): Color {
-    val paletteIndex = (speakerId.hashCode() and Int.MAX_VALUE) % SPEAKER_PALETTE.size
-    return SPEAKER_PALETTE[paletteIndex].copy(alpha = if (darkTheme) 0.42f else 0.28f)
+    val hue = (colorSlot * GOLDEN_ANGLE_DEGREES) % 360f
+    return Color
+        .hsl(hue = hue, saturation = 0.68f, lightness = 0.58f)
+        .copy(alpha = if (darkTheme) 0.42f else 0.28f)
 }
 
-private val SPEAKER_PALETTE = listOf(
-    Color(0xFFFFB74D),
-    Color(0xFF4DD0E1),
-    Color(0xFFF06292),
-    Color(0xFF81C784),
-    Color(0xFFBA68C8),
-    Color(0xFFFF8A65),
-    Color(0xFF64B5F6),
-    Color(0xFFDCE775),
-    Color(0xFF7986CB),
-    Color(0xFF4DB6AC),
-)
+private fun stableColorSlot(speakerId: String): Int =
+    speakerId.hashCode() and Int.MAX_VALUE
 
-private const val MAX_LEGEND_SPEAKERS = 16
+private const val MAX_LEGEND_SPEAKERS = 32
+private const val COMPLETE_CACHE_THRESHOLD = 0.999f
+private const val GOLDEN_ANGLE_DEGREES = 137.50776f
 
 private fun formatCoverage(coverage: Float): String {
     val percentage = coverage.coerceIn(0f, 1f) * 100f
