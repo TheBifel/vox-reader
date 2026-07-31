@@ -28,8 +28,8 @@ book. This handles legitimate desktop/Android sentence-boundary differences with
 discarding assignments.
 
 An imported JSON is authoritative. Every row, including `narrator` and `unknown`, is considered a
-completed decision. VoxReader does not run live TinyBERT/LLM attribution over an imported
-manifest; it only renders the cached speaker colors and reuses the cached voice profiles.
+completed decision. VoxReader does not run live attribution; it renders cached speaker colors and
+reuses cached voice profiles. Without an imported map, playback uses the Narrator profile.
 
 ## Document shape
 

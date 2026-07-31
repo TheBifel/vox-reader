@@ -13,10 +13,9 @@ the same local attribution cache, character registry, and voice assignments. The
 that cache without knowing which provider created it.
 
 The plan is based on the current single-activity Kotlin/Compose application, manual dependency
-injection in `AppContainer`, MVVM presentation, `CharacterAnalyzer`, sentence-level
-`SpeechPhrase`s, Android TTS, and Preferences DataStore. It deliberately does not alter the
-real-time TinyBERT work. Pre-analysis is an additional producer of attribution data and can be
-implemented after the live classifier has stabilized.
+injection in `AppContainer`, MVVM presentation, sentence-level `SpeechPhrase`s, Android TTS,
+Room, and Preferences DataStore. All analysis paths must produce the same portable JSON/cache
+contract; the reader itself does not infer speakers.
 
 ## Product outcome
 
@@ -28,7 +27,7 @@ the app:
 - keeps a character's voice stable throughout the book;
 - continues to highlight and turn pages from Android TTS callbacks;
 - works offline during playback, even when cloud analysis produced the cache; and
-- falls back to the existing rules and live classifier wherever the cache is incomplete.
+- uses the Narrator profile wherever no authoritative cached speaker exists.
 
 Pre-analysis stores speaker decisions, not generated audio. Android TTS still synthesizes each
 phrase in real time, so playback speed, highlighting, sentence navigation, and page changes remain
@@ -54,14 +53,14 @@ interactive.
 - Voice cloning or identifying the gender of a real person.
 - Uploading an EPUB file directly to a provider.
 - Letting a cloud model control the app, call tools, or return arbitrary offsets into the book.
-- Replacing live rules/TinyBERT; they remain the cache-miss path.
+- Adding live speaker inference to the reader; cache misses remain narrator-only.
 - Building a provider account, billing system, or production backend in the first local POC.
 - Automatically analyzing every imported book in the cloud.
 
 ## Core design decisions
 
 1. **The reader never waits for pre-analysis.** Cache lookup is local and bounded. A miss uses the
-   current rules/TinyBERT pipeline immediately.
+   Narrator profile immediately.
 2. **Room owns high-volume structured state.** Phrase attribution, character aliases, runs, chunks,
    and checkpoints belong in Room. DataStore remains for small preferences and library metadata.
 3. **Results are staged per run.** A failed or canceled run cannot corrupt the currently active
@@ -70,11 +69,9 @@ interactive.
    or source offsets.
 5. **Character identity and voice assignment are separate.** Re-attributing dialogue should not
    randomly reshuffle existing voices.
-6. **A provider cannot overwrite high-confidence deterministic facts without recording a
-   conflict.** Explicit dialogue tags and quote-continuation rules remain strong evidence.
-7. **Cloud is opt-in per book/run.** Consent, estimated usage, network choice, and cancellation are
+6. **Cloud is opt-in per book/run.** Consent, estimated usage, network choice, and cancellation are
    visible before text leaves the device.
-8. **A job is a durable state machine, not a long coroutine in a ViewModel.** Work continues under
+7. **A job is a durable state machine, not a long coroutine in a ViewModel.** Work continues under
    WorkManager and is observed by the UI.
 
 ## Target architecture
@@ -94,7 +91,7 @@ flowchart TB
     DATASTORE["Preferences DataStore"] --> VM
     ROOM --> RESOLVER["AttributionCacheResolver"]
     RESOLVER --> READER["ReaderViewModel"]
-    READER --> FALLBACK["Rules / TinyBERT cache-miss path"]
+    READER --> FALLBACK["Narrator-only cache-miss path"]
     READER --> TTS["Android real-time TTS"]
 ```
 
@@ -806,7 +803,7 @@ user-locked assignment
 → active validated pre-analysis cache
 → already accepted live result in this session
 → deterministic rules
-→ TinyBERT live classifier
+→ Narrator profile
 → previous speaker when structurally safe
 → narrator/neutral fallback
 ```
@@ -1080,7 +1077,7 @@ contains no secrets/source passages in logs or stored output.
 - Preserve current utterance semantics and fallback priority.
 - Add drawer status and diagnostics.
 
-Exit criterion: cached results are instant, cache misses use rules/TinyBERT, and no analysis provider
+Exit criterion: cached results are instant, cache misses use the Narrator profile, and no analysis provider
 can block the TTS loop.
 
 ### Stage 6: hardening and productization

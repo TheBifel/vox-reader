@@ -1,7 +1,7 @@
 package com.bifel.voxreader.data.epub
 
 import android.content.Context
-import android.net.Uri
+import androidx.core.net.toUri
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.StoredBook
 import com.bifel.voxreader.domain.repository.BookRepository
@@ -23,7 +23,7 @@ class LocalBookRepository(
 
         try {
             val digest = MessageDigest.getInstance("SHA-256")
-            val uri = Uri.parse(sourceUri)
+            val uri = sourceUri.toUri()
             val input = context.contentResolver.openInputStream(uri)
                 ?: error("The selected EPUB cannot be opened.")
 

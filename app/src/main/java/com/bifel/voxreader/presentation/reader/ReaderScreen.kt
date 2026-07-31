@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.filled.SkipNext
@@ -79,7 +78,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.rememberTextMeasurer
 import com.bifel.voxreader.domain.model.BookDocument
-import com.bifel.voxreader.domain.model.CharacterAnalysisSource
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.SpeechPhrase
@@ -277,31 +275,22 @@ private fun ReaderDrawer(
             ListItem(
                 headlineContent = {
                     Text(
-                        if (state.cachedAttributionCoverage >= COMPLETE_CACHE_THRESHOLD) {
+                        if (state.cachedAttributionProvider != null) {
                             "Cached JSON speaker map"
                         } else {
-                            "TinyBERT dialogue classifier"
+                            "Narrator-only mode"
                         },
                     )
                 },
                 supportingContent = {
-                    if (state.cachedAttributionCoverage >= COMPLETE_CACHE_THRESHOLD) {
-                        Text("Authoritative for this book. Live speaker recognition is skipped.")
+                    if (state.cachedAttributionProvider != null) {
+                        Text("Authoritative character voices and colors for this book.")
                     } else {
-                        val source = if (
-                            state.lastAnalysisSource == CharacterAnalysisSource.TINY_BERT
-                        ) {
-                            "TinyBERT"
-                        } else {
-                            "dialogue rules"
-                        }
-                        Text(
-                            "Bundled and fully offline. Last speaker decision used $source.",
-                        )
+                        Text("Import a speaker-analysis JSON to add character voices and colors.")
                     }
                 },
                 leadingContent = {
-                    Icon(Icons.Default.Psychology, contentDescription = null)
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null)
                 },
             )
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
@@ -900,7 +889,6 @@ private fun includeAdjacentClosingQuotes(
     return result
 }
 
-private const val COMPLETE_CACHE_THRESHOLD = 0.999f
 private const val GOLDEN_ANGLE_DEGREES = 137.50776f
 private val BOOK_QUOTE_MARKS = setOf('"', '\u201c', '\u201d', '\u201e', '\u00ab', '\u00bb')
 

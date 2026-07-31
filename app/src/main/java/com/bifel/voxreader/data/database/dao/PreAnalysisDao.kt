@@ -20,30 +20,11 @@ interface AnalysisRunDao {
     @Query(
         """
         SELECT * FROM analysis_run
-        WHERE bookId = :bookId
-        ORDER BY updatedAt DESC
-        LIMIT 1
-        """,
-    )
-    fun observeLatest(bookId: String): Flow<AnalysisRunEntity?>
-
-    @Query(
-        """
-        SELECT * FROM analysis_run
         WHERE bookId = :bookId AND active = 1
         LIMIT 1
         """,
     )
     fun observeActive(bookId: String): Flow<AnalysisRunEntity?>
-
-    @Query(
-        """
-        SELECT * FROM analysis_run
-        WHERE bookId = :bookId AND active = 1
-        LIMIT 1
-        """,
-    )
-    suspend fun findActive(bookId: String): AnalysisRunEntity?
 
     @Query("UPDATE analysis_run SET active = 0, updatedAt = :updatedAt WHERE bookId = :bookId")
     suspend fun deactivateBook(bookId: String, updatedAt: Long)
@@ -57,19 +38,6 @@ interface AnalysisRunDao {
     )
     suspend fun activate(runId: String, updatedAt: Long)
 
-    @Query(
-        """
-        UPDATE analysis_run
-        SET status = :status, cancelRequested = :cancelRequested, updatedAt = :updatedAt
-        WHERE runId = :runId
-        """,
-    )
-    suspend fun updateStatus(
-        runId: String,
-        status: String,
-        cancelRequested: Boolean,
-        updatedAt: Long,
-    )
 }
 
 @Dao
@@ -95,20 +63,6 @@ interface PhraseAttributionDao {
         INNER JOIN analysis_run AS run ON run.runId = attribution.runId
         WHERE attribution.bookId = :bookId
           AND run.active = 1
-          AND attribution.phraseId IN (:phraseIds)
-        """,
-    )
-    suspend fun activeForPhraseIds(
-        bookId: String,
-        phraseIds: List<String>,
-    ): List<PhraseAttributionEntity>
-
-    @Query(
-        """
-        SELECT attribution.* FROM phrase_attribution AS attribution
-        INNER JOIN analysis_run AS run ON run.runId = attribution.runId
-        WHERE attribution.bookId = :bookId
-          AND run.active = 1
         """,
     )
     suspend fun activeForBook(bookId: String): List<PhraseAttributionEntity>
@@ -118,15 +72,6 @@ interface PhraseAttributionDao {
 interface CharacterDao {
     @Upsert
     suspend fun upsert(characters: List<CharacterEntity>)
-
-    @Query(
-        """
-        SELECT * FROM character_registry
-        WHERE bookId = :bookId AND runId = :runId
-        ORDER BY displayName
-        """,
-    )
-    suspend fun forRun(bookId: String, runId: String): List<CharacterEntity>
 
     @Query(
         """

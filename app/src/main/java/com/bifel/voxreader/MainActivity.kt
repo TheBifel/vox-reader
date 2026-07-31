@@ -32,7 +32,6 @@ class MainActivity : ComponentActivity() {
             loadLatestBook = container.loadLatestBook,
             libraryRepository = container.libraryRepository,
             settingsRepository = container.settingsRepository,
-            characterAnalyzer = container.characterAnalyzer,
             speechEngine = container.speechEngine,
             portableAnalysisService = container.portableAnalysisService,
         )

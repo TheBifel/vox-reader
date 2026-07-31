@@ -9,7 +9,6 @@ import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
 import com.bifel.voxreader.domain.preanalysis.model.PhraseManifestItem
-import com.bifel.voxreader.domain.preanalysis.model.PreAnalysisRequest
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarBundle
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarMetadata
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarRow
@@ -97,18 +96,11 @@ class PortableAnalysisService(
         val manifest = bundle.toManifest()
 
         val runId = store.createRun(
-            PreAnalysisRequest(
-                bookId = book.id,
-                providerId = bundle.metadata.providerId,
-                replaceExisting = true,
-            ),
-        )
-        store.prepareRun(
-            runId = runId,
+            bookId = book.id,
+            providerId = bundle.metadata.providerId,
             totalPhrases = manifest.size,
-            providerModelId = bundle.metadata.providerId,
         )
-        val result = bundle.toProviderResult(runId)
+        val result = bundle.toProviderResult()
         store.stageValidatedRevision(
             runId = runId,
             attributions = result.attributions,
@@ -125,11 +117,6 @@ class PortableAnalysisService(
             },
         )
     }
-
-    suspend fun cached(
-        book: BookDocument,
-        phrases: List<SpeechPhrase>,
-    ): CachedAnalysis = cached(book) { phrases }
 
     /**
      * Restores a persisted phrase manifest without re-segmenting the whole book. The fallback is

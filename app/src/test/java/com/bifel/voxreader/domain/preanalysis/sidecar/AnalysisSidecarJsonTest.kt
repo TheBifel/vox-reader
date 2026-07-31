@@ -4,7 +4,6 @@ import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.EmotionType
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
-import com.bifel.voxreader.domain.preanalysis.model.AnalysisRunId
 import com.bifel.voxreader.domain.preanalysis.model.AttributionSource
 import com.bifel.voxreader.domain.preanalysis.model.EvidenceKind
 import com.bifel.voxreader.domain.model.VoiceGroup
@@ -56,7 +55,7 @@ class AnalysisSidecarJsonTest {
                 bookText = phrase.text,
             ).isEmpty(),
         )
-        val result = decoded.toProviderResult(AnalysisRunId("run"))
+        val result = decoded.toProviderResult()
         assertEquals("alice", result.attributions.single().characterId)
         assertEquals(VoiceGroup.FEMALE, result.characters.single().voiceGroup)
     }
@@ -139,7 +138,7 @@ class AnalysisSidecarJsonTest {
             rows = listOf(unknownSidecarRow(manifest.single(), phrase.text)),
         )
 
-        val result = bundle.toProviderResult(AnalysisRunId("run"))
+        val result = bundle.toProviderResult()
 
         assertEquals(1, result.attributions.size)
         assertEquals("unknown", result.attributions.single().characterId)

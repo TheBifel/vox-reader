@@ -11,9 +11,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
-import com.bifel.voxreader.domain.model.CURRENT_CHARACTER_ATTRIBUTION_VERSION
 import com.bifel.voxreader.domain.model.LibraryState
-import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.ReaderSettings
 import com.bifel.voxreader.domain.model.StoredBook
 import com.bifel.voxreader.domain.model.VoiceGroup
@@ -94,18 +92,6 @@ class ReaderDataStoreRepository(
         }
     }
 
-    override suspend fun updateCharacters(
-        bookId: String,
-        characters: List<CharacterProfile>,
-    ) {
-        updateBook(bookId) {
-            it.copy(
-                characters = characters,
-                characterAttributionVersion = CURRENT_CHARACTER_ATTRIBUTION_VERSION,
-            )
-        }
-    }
-
     override suspend fun updateVoiceOverride(
         bookId: String,
         profile: CharacterProfile,
@@ -169,14 +155,7 @@ class ReaderDataStoreRepository(
         put("localPath", localPath)
         put("readingPosition", readingPosition)
         put("pageEndPosition", pageEndPosition)
-        put("characterAttributionVersion", characterAttributionVersion)
         put("lastOpenedAt", lastOpenedAt)
-        put(
-            "characters",
-            JSONArray().apply {
-                characters.forEach { put(it.toJson()) }
-            },
-        )
         put(
             "voiceOverrides",
             JSONArray().apply {
@@ -196,24 +175,11 @@ class ReaderDataStoreRepository(
     }
 
     private fun JSONObject.toStoredBook(): StoredBook {
-        val characterArray = optJSONArray("characters") ?: JSONArray()
-        val decodedCharacters = buildList {
-            for (index in 0 until characterArray.length()) {
-                add(characterArray.getJSONObject(index).toCharacterProfile())
-            }
-        }
         val overrideArray = optJSONArray("voiceOverrides") ?: JSONArray()
         val voiceOverrides = buildList {
             for (index in 0 until overrideArray.length()) {
                 add(overrideArray.getJSONObject(index).toCharacterProfile())
             }
-        }
-        val attributionVersion = optInt("characterAttributionVersion", 0)
-        val characters = if (attributionVersion < CURRENT_CHARACTER_ATTRIBUTION_VERSION) {
-            decodedCharacters
-                .filter { it.id == NARRATOR_ID }
-        } else {
-            decodedCharacters
         }
         return StoredBook(
             id = getString("id"),
@@ -221,9 +187,7 @@ class ReaderDataStoreRepository(
             localPath = getString("localPath"),
             readingPosition = optInt("readingPosition", 0),
             pageEndPosition = optInt("pageEndPosition", 0),
-            characters = characters,
             voiceOverrides = voiceOverrides,
-            characterAttributionVersion = attributionVersion,
             lastOpenedAt = optLong("lastOpenedAt", 0L),
         )
     }

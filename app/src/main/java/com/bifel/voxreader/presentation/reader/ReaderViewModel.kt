@@ -4,8 +4,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.bifel.voxreader.domain.analysis.CharacterAnalysisRequest
-import com.bifel.voxreader.domain.analysis.CharacterAnalyzer
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NarratorProfile
@@ -33,8 +31,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class ReaderViewModel(
@@ -42,7 +38,6 @@ class ReaderViewModel(
     private val loadLatestBook: LoadLatestBookUseCase,
     private val libraryRepository: LibraryRepository,
     private val settingsRepository: SettingsRepository,
-    private val characterAnalyzer: CharacterAnalyzer,
     private val speechEngine: SpeechEngine,
     private val portableAnalysisService: PortableAnalysisService,
 ) : ViewModel() {
@@ -52,13 +47,10 @@ class ReaderViewModel(
 
     private var initialized = false
     private var storedBook: StoredBook? = null
-    private val analyzedPhraseRanges = mutableListOf<IntRange>()
     private var currentUtteranceId: String? = null
     private var speechQueueJob: Job? = null
-    private var analysisLookAheadJob: Job? = null
     private val speechBuffer = PhrasePlaybackBuffer(SPEECH_LOOK_AHEAD_PHRASES)
     private var playbackSession = 0L
-    private val analysisMutex = Mutex()
 
     init {
         viewModelScope.launch {
@@ -159,7 +151,6 @@ class ReaderViewModel(
             )
         storedBook = storedBook?.let { stored ->
             stored.copy(
-                characters = updatedCharacters,
                 voiceOverrides = stored.voiceOverrides.filterNot { it.id == profile.id } + profile,
             )
         }
@@ -251,13 +242,11 @@ class ReaderViewModel(
                     result to cached
                 }
             }.onSuccess { (result, cached) ->
-                analyzedPhraseRanges.clear()
                 val overrides = storedBook?.voiceOverrides.orEmpty()
                 val characters = applyVoiceOverrides(
                     cached.characters.ifEmpty { listOf(NarratorProfile) },
                     overrides,
                 )
-                storedBook = storedBook?.copy(characters = characters)
                 mutableUiState.update {
                     it.copy(
                         phrases = cached.phrases,
@@ -314,20 +303,14 @@ class ReaderViewModel(
         stored: StoredBook,
     ) {
         storedBook = stored
-        analyzedPhraseRanges.clear()
         val cached = withContext(Dispatchers.Default) {
             portableAnalysisService.cached(document) {
                 SentenceSegmenter.segment(document.text)
             }
         }
         val phrases = cached.phrases
-        val baseCharacters = if (cached.providerId != null) {
-            cached.characters.ifEmpty { listOf(NarratorProfile) }
-        } else {
-            stored.characters.ifEmpty { listOf(NarratorProfile) }
-        }
+        val baseCharacters = cached.characters.ifEmpty { listOf(NarratorProfile) }
         val characters = applyVoiceOverrides(baseCharacters, stored.voiceOverrides)
-        storedBook = stored.copy(characters = characters)
         val restoredPosition = stored.readingPosition.coerceIn(0, document.text.length)
         mutableUiState.update { current ->
             current.copy(
@@ -453,7 +436,7 @@ class ReaderViewModel(
         initialIndex: Int,
         flushQueue: Boolean,
     ) {
-        val book = mutableUiState.value.book ?: return
+        mutableUiState.value.book ?: return
         var index: Int? = initialIndex
         var queueMode = if (flushQueue) {
             SpeechQueueMode.FLUSH
@@ -466,8 +449,6 @@ class ReaderViewModel(
             index != null
         ) {
             val phraseIndex = index
-            ensurePhraseAnalyzed(book, phraseIndex)
-            if (session != playbackSession) return
             if (!speechBuffer.containsPhrase(phraseIndex)) {
                 enqueuePhrase(
                     index = phraseIndex,
@@ -546,7 +527,6 @@ class ReaderViewModel(
                         playbackState = PlaybackState.PLAYING,
                     )
                 }
-                startAnalysisLookAhead(buffered.phraseIndex + 1)
             }
 
             is SpeechEvent.Range -> if (event.utteranceId == currentUtteranceId) {
@@ -627,127 +607,6 @@ class ReaderViewModel(
         return if (index >= 0) index else state.phrases.lastIndex.coerceAtLeast(0)
     }
 
-    private fun isPhraseAnalyzed(index: Int): Boolean =
-        index in mutableUiState.value.cachedSpeakerPhraseIndices ||
-            analyzedPhraseRanges.any { index in it }
-
-    private suspend fun ensurePhraseAnalyzed(
-        book: BookDocument,
-        index: Int,
-    ) {
-        if (isPhraseAnalyzed(index)) return
-        analysisMutex.withLock {
-            if (isPhraseAnalyzed(index)) return@withLock
-            val latest = mutableUiState.value
-            val phrase = latest.phrases.getOrNull(index)
-                ?: error("The requested sentence is no longer available.")
-            val analysis = characterAnalyzer.analyze(
-                CharacterAnalysisRequest(
-                    text = book.text,
-                    knownCharacters = latest.characters,
-                    existingPhrases = latest.phrases,
-                    focusPosition = phrase.start,
-                    preservedPhraseRanges = analyzedPhraseRanges.toList() +
-                        cachedPhraseRanges(latest.cachedSpeakerPhraseIndices),
-                ),
-            )
-            val mergedPhrases = analysis.phrases.mapIndexed { phraseIndex, analyzed ->
-                if (phraseIndex in latest.cachedSpeakerPhraseIndices) {
-                    latest.phrases.getOrNull(phraseIndex) ?: analyzed
-                } else {
-                    analyzed
-                }
-            }
-            val mergedCharacters = (latest.characters + analysis.characters)
-                .distinctBy(CharacterProfile::id)
-            val resolvedPhrase = mergedPhrases.getOrNull(index)
-            val resolvedProfile = mergedCharacters.firstOrNull {
-                it.id == resolvedPhrase?.speakerId
-            } ?: NarratorProfile
-            Log.d(
-                TAG,
-                "Attributed phrase $index [${resolvedPhrase?.start},${resolvedPhrase?.end}) as " +
-                    "${resolvedProfile.displayName} " +
-                    "(${resolvedProfile.voiceGroup}) using ${analysis.source}",
-            )
-            analysis.analyzedPhraseRange?.let(::rememberAnalyzedRange)
-            storedBook = storedBook?.copy(characters = mergedCharacters)
-            mutableUiState.update {
-                it.copy(
-                    phrases = mergedPhrases,
-                    characters = mergedCharacters,
-                    lastAnalysisSource = analysis.source,
-                )
-            }
-            libraryRepository.updateCharacters(book.id, mergedCharacters)
-        }
-    }
-
-    private fun cachedPhraseRanges(indices: Set<Int>): List<IntRange> {
-        if (indices.isEmpty()) return emptyList()
-        val ranges = mutableListOf<IntRange>()
-        indices.sorted().forEach { index ->
-            val previous = ranges.lastOrNull()
-            if (previous != null && index == previous.last + 1) {
-                ranges[ranges.lastIndex] = previous.first..index
-            } else {
-                ranges += index..index
-            }
-        }
-        return ranges
-    }
-
-    /**
-     * Character attribution is intentionally pipelined with speech. While Android TTS reads
-     * the current sentence, TinyBERT resolves a short window ahead in the background.
-     */
-    private fun startAnalysisLookAhead(fromIndex: Int) {
-        if (analysisLookAheadJob?.isActive == true) return
-        val book = mutableUiState.value.book ?: return
-        val lastIndex = mutableUiState.value.phrases.lastIndex
-        if (fromIndex !in 0..lastIndex) return
-        val windowEnd = (fromIndex + ANALYSIS_LOOK_AHEAD_PHRASES - 1)
-            .coerceAtMost(lastIndex)
-
-        analysisLookAheadJob = viewModelScope.launch {
-            runCatching {
-                while (mutableUiState.value.playbackState == PlaybackState.PLAYING ||
-                    mutableUiState.value.playbackState == PlaybackState.PREPARING
-                ) {
-                    val nextUnresolved = (fromIndex..windowEnd)
-                        .firstOrNull {
-                            !isPhraseAnalyzed(it) &&
-                                SpeechText.isSpeakable(mutableUiState.value.phrases[it].text)
-                        }
-                        ?: break
-                    ensurePhraseAnalyzed(book, nextUnresolved)
-                }
-            }.onFailure { error ->
-                if (error !is CancellationException) {
-                    Log.w(TAG, "Character look-ahead stopped; playback will retry on demand", error)
-                }
-            }
-        }
-    }
-
-    private fun rememberAnalyzedRange(newRange: IntRange) {
-        if (newRange.isEmpty()) return
-        val allRanges = buildList {
-            addAll(analyzedPhraseRanges)
-            add(newRange)
-        }.sortedBy { it.first }
-        analyzedPhraseRanges.clear()
-        allRanges.forEach { range ->
-            val previous = analyzedPhraseRanges.lastOrNull()
-            if (previous != null && range.first <= previous.last + 1) {
-                analyzedPhraseRanges[analyzedPhraseRanges.lastIndex] =
-                    previous.first..maxOf(previous.last, range.last)
-            } else {
-                analyzedPhraseRanges.add(range)
-            }
-        }
-    }
-
     private fun handlePreparationFailure(error: Throwable) {
         if (error is CancellationException) return
         speechFailure(error)
@@ -784,8 +643,6 @@ class ReaderViewModel(
         playbackSession++
         speechQueueJob?.cancel()
         speechQueueJob = null
-        analysisLookAheadJob?.cancel()
-        analysisLookAheadJob = null
         currentUtteranceId = null
         speechBuffer.clear()
         speechEngine.stop()
@@ -843,7 +700,6 @@ class ReaderViewModel(
 
     private companion object {
         const val TAG = "VoxReader"
-        const val ANALYSIS_LOOK_AHEAD_PHRASES = 6
         const val SPEECH_LOOK_AHEAD_PHRASES = 3
     }
 
@@ -852,7 +708,6 @@ class ReaderViewModel(
         private val loadLatestBook: LoadLatestBookUseCase,
         private val libraryRepository: LibraryRepository,
         private val settingsRepository: SettingsRepository,
-        private val characterAnalyzer: CharacterAnalyzer,
         private val speechEngine: SpeechEngine,
         private val portableAnalysisService: PortableAnalysisService,
     ) : ViewModelProvider.Factory {
@@ -863,7 +718,6 @@ class ReaderViewModel(
                 loadLatestBook = loadLatestBook,
                 libraryRepository = libraryRepository,
                 settingsRepository = settingsRepository,
-                characterAnalyzer = characterAnalyzer,
                 speechEngine = speechEngine,
                 portableAnalysisService = portableAnalysisService,
             ) as T

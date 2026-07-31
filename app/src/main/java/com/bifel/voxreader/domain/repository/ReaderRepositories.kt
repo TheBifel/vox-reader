@@ -19,7 +19,6 @@ interface LibraryRepository {
     suspend fun saveImportedBook(book: BookDocument)
     suspend fun markOpened(bookId: String)
     suspend fun updateReadingPosition(bookId: String, pageStart: Int, pageEnd: Int)
-    suspend fun updateCharacters(bookId: String, characters: List<CharacterProfile>)
     suspend fun updateVoiceOverride(bookId: String, profile: CharacterProfile)
 }
 

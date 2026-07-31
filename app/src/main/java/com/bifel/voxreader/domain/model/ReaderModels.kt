@@ -14,9 +14,7 @@ data class StoredBook(
     val localPath: String,
     val readingPosition: Int = 0,
     val pageEndPosition: Int = 0,
-    val characters: List<CharacterProfile> = emptyList(),
     val voiceOverrides: List<CharacterProfile> = emptyList(),
-    val characterAttributionVersion: Int = 0,
     val lastOpenedAt: Long = System.currentTimeMillis(),
 )
 
@@ -60,21 +58,8 @@ data class SpeechPhrase(
     val speakerId: String = NARRATOR_ID,
 )
 
-data class CharacterAnalysis(
-    val phrases: List<SpeechPhrase>,
-    val characters: List<CharacterProfile>,
-    val analyzedPhraseRange: IntRange? = null,
-    val source: CharacterAnalysisSource = CharacterAnalysisSource.RULES,
-)
-
-enum class CharacterAnalysisSource {
-    RULES,
-    TINY_BERT,
-}
-
 const val NARRATOR_ID = "narrator"
 const val UNKNOWN_SPEAKER_ID = "unknown"
-const val CURRENT_CHARACTER_ATTRIBUTION_VERSION = 7
 
 val NarratorProfile = CharacterProfile(
     id = NARRATOR_ID,

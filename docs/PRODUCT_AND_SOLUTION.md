@@ -3,8 +3,7 @@
 The whole-book speaker-analysis exchange format is documented in
 [`SPEAKER_ANALYSIS_JSON.md`](SPEAKER_ANALYSIS_JSON.md). It is the shared contract for manual,
 cloud/outsourced, desktop, and future overnight analysis. Once imported, its phrase manifest and
-speaker decisions are authoritative: the reader displays cached character colors and does not run
-live attribution for that manifest.
+speaker decisions are authoritative. The reader does not perform live speaker attribution.
 
 ## What the app does
 
@@ -13,11 +12,12 @@ playback. The reader displays a book as fixed pages, speaks the text currently b
 highlights the active text as speech progresses. Dialogue is associated with recurring fictional
 characters, and each character receives a stable local voice variation.
 
-The proof of concept deliberately avoids voice cloning, cloud services, accounts, and server-side
-inference. It uses deterministic dialogue rules plus a bundled, task-specific TinyBERT classifier
-on the phone, then uses voices already available in Android's local text-to-speech engine.
-Characters are differentiated through deterministic voice selection, pitch, and speaking-rate
-profiles. Imported phrase emotions can temporarily modify that profile while a phrase is spoken.
+The proof of concept deliberately avoids voice cloning, accounts, and inference inside the reader.
+Speaker decisions arrive through a portable whole-book JSON file produced manually, on a desktop,
+or by an optional external service. Playback then stays offline and uses voices already available
+in Android's local text-to-speech engine. Characters are differentiated through deterministic
+voice selection, pitch, and speaking-rate profiles. Imported phrase emotions can temporarily
+modify that profile while a phrase is spoken.
 
 The long-term goal is a private audiobook-like reading experience that:
 
@@ -37,8 +37,8 @@ and choosing VoxReader. The app copies the source file into its private applicat
 the reading order, and remembers the imported book in DataStore.
 
 Launching VoxReader normally reopens the most recently used book at the saved page position.
-There is intentionally no in-app library browser or file picker in this POC. The attribution model
-is bundled with the application and needs no separate installation.
+There is intentionally no in-app library browser or file picker in this POC. Without an imported
+speaker-analysis JSON, all phrases use the Narrator profile.
 
 ### Reading
 
@@ -73,7 +73,7 @@ The drawer contains:
 
 - a dark/light reader theme switch; and
 - a command to enable or hide text-to-speech controls;
-- the active offline attribution engine and last-analysis status; and
+- the active speaker-map status; and
 - an editable Narrator and character list with voice group, variation, pitch, and base-rate
   controls.
 
@@ -86,7 +86,7 @@ When speech controls are enabled, previous-sentence, play/pause, and next-senten
 above the reading progress bar. A speed control above them adjusts global playback from `0.5x` to
 `2.0x` and is remembered across launches. Pressing play starts from the first speakable sentence
 visible on the current page. During initial speech preparation, the play button becomes a loader.
-This loader represents character-data preparation and Android TTS initialization. Once playback
+This loader represents speech queue preparation and Android TTS initialization. Once playback
 starts, buffered sentence transitions retain the normal pause button; the loader returns only if
 the rolling buffer genuinely runs dry.
 
@@ -108,17 +108,11 @@ flowchart LR
     D --> E["Extract normalized chapter text"]
     E --> F["Restore character offset from DataStore"]
     F --> G["Measure and display current page"]
-    G --> H["User enables speech and presses play"]
-    H --> I["Segment sentences and select a small scene"]
-    I --> J["Deterministic rules resolve explicit and continuing dialogue"]
-    J --> K{"Speaker still ambiguous?"}
-    K -->|Yes| L["TinyBERT scores nearby character candidates"]
-    K -->|No| M["Use rule attribution"]
-    L -->|Confident| N["Use highest-scoring candidate"]
-    L -->|Low confidence or error| M
-    N --> O["Reuse persistent character profile"]
-    M --> O
-    O --> P["Choose offline Android voice and saved profile"]
+    G --> H{"Speaker JSON cached?"}
+    H -->|Yes| I["Load cached speakers, profiles, and emotions"]
+    H -->|No| J["Use Narrator profile"]
+    I --> P["Choose offline Android voice and saved profile"]
+    J --> P
     P --> Q["Apply global speed and optional phrase emotion"]
     Q --> S["Queue current sentence plus two look-ahead sentences"]
     S --> R["Speak and highlight the current TTS range"]
@@ -143,14 +137,14 @@ com.bifel.voxreader
 ├── domain
 │   ├── model          Pure application models
 │   ├── repository     Storage and book-source contracts
-│   ├── analysis       CharacterAnalyzer contract
+│   ├── preanalysis    Portable analysis models and contracts
 │   ├── speech         SpeechEngine contract and events
 │   ├── text           Sentence segmentation
 │   └── usecase        Import and restore workflows
 ├── data
 │   ├── epub           Local file import and EPUB parser
 │   ├── preferences    DataStore repository
-│   ├── analysis       Dialogue rules, TinyBERT candidate scorer, and tokenizer
+│   ├── preanalysis    JSON validation and Room cache
 │   └── speech         Android TextToSpeech adapter
 ├── presentation
 │   ├── reader         Reader ViewModel, UI state, pagination, and screen
@@ -166,7 +160,7 @@ com.bifel.voxreader
 
 - loading or importing a book;
 - restoring and saving reading position;
-- preparing character analysis;
+- importing and resolving cached speaker analysis;
 - controlling sentence-level playback;
 - mapping TTS timing events to global book offsets; and
 - exposing immutable `ReaderUiState`.
@@ -177,18 +171,17 @@ which persists the corresponding character offset. Phrase and page-boundary sear
 lookup over their ordered manifests rather than whole-book scans.
 
 Data implementations do not leak into the ViewModel. It depends on interfaces such as
-`BookRepository`, `LibraryRepository`, `CharacterAnalyzer`, and `SpeechEngine`.
+`BookRepository`, `LibraryRepository`, and `SpeechEngine`.
 
 ### SOLID design choices
 
-- **Single responsibility:** EPUB parsing, persistence, dialogue analysis, speech synthesis,
+- **Single responsibility:** EPUB parsing, persistence, analysis-file handling, speech synthesis,
   pagination, and UI orchestration are separate classes.
-- **Open/closed:** the hybrid TinyBERT analyzer and deterministic fallback both implement
-  `CharacterAnalyzer`; another candidate scorer can implement `SpeakerScorer`, and a
-  Kokoro/sherpa-onnx engine can implement `SpeechEngine`.
+- **Open/closed:** another offline synthesis implementation can implement `SpeechEngine` without
+  changing reader state or controls.
 - **Liskov substitution:** callers use the domain contracts and do not depend on Android TTS or
   DataStore implementation details.
-- **Interface segregation:** storage, settings, character analysis, and speech have small,
+- **Interface segregation:** storage, settings, cached analysis, and speech have small,
   purpose-specific contracts.
 - **Dependency inversion:** the ViewModel and use cases depend on domain interfaces; `AppContainer`
   selects concrete Android implementations at the application boundary.
@@ -227,35 +220,18 @@ Book text is not duplicated inside DataStore. EPUB files live under the app's pr
 directory and are named by a SHA-256 digest. Reopening the same source therefore reuses the stored
 copy and its existing progress/character profiles.
 
-## On-device character attribution
+## Speaker-analysis cache
 
-The hybrid analyzer starts with an inexpensive deterministic pass. It segments sentences,
-recognizes quotation marks, finds patterns such as `Alice said` and `asked Bob`, preserves a
-speaker through an open quotation or paragraph continuation, tracks recent dialogue participants,
-and assigns non-dialogue text to the narrator. Explicit dialogue tags are trusted without neural
-inference.
+VoxReader accepts one versioned JSON contract for manual, desktop, cloud, and future overnight
+analysis. Import validates the book hash, phrase offsets, text hashes, schema versions, profiles,
+and emotions before a new Room revision becomes active. Invalid or incomplete files never replace
+the currently active revision.
 
-Only ambiguous dialogue reaches the classifier. VoxReader builds a short scene, marks the target
-dialogue, and supplies up to six dynamic candidates taken from nearby and saved characters.
-TinyBERT scores `(scene, candidate)` pairs as `speaker` or `not speaker`. This pairwise formulation
-does not place book-specific names in fixed model labels and therefore supports unseen books.
-VoxReader accepts the winner only when both the probability and the margin over the runner-up meet
-configured thresholds. Low confidence, invalid output, or runtime failure returns immediately to
-the deterministic result.
-
-The bundled model is fine-tuned from
-[`huawei-noah/TinyBERT_General_4L_312D`](https://huggingface.co/huawei-noah/TinyBERT_General_4L_312D)
-using generated fiction scenes that contain no source-book text. It is exported to ONNX and
-dynamically quantized to 8-bit weights at roughly 14 MB. ONNX Runtime executes all candidates in one CPU
-batch, and a local WordPiece tokenizer produces the model's fixed 160-token input. The app warms
-the classifier in the background; there is no model picker, generative prompt, or 374–475 MB model
-file.
-
-Gender/voice group is resolved at character-profile level from book evidence and is not predicted
-independently for every utterance. Processed phrase ranges are remembered during playback.
-Previously attributed sentences and saved character profiles are preserved as the next scene is
-analyzed. Profiles are stored per book in DataStore and reused after relaunch. Attribution schema
-version changes neutralize old uncertain profiles before they are grounded again.
+The reader treats every imported row, including `narrator` and `unknown`, as authoritative. It
+does not guess speakers during playback. When no valid cache exists, sentence segmentation still
+supports navigation and TTS, but every phrase uses the Narrator profile. Voice edits are stored
+separately in DataStore and overlaid on imported profiles, so reimporting analysis does not erase
+the user's settings.
 
 ## Speech generation
 
@@ -293,15 +269,6 @@ Android's standard TTS API does not expose sample-accurate pause/resume.
 - Add font size, margins, and line-spacing controls.
 - Improve long-sentence and nested-quotation handling.
 
-### On-device intelligence hardening
-
-- Measure attribution accuracy on a representative EPUB set.
-- Add a reviewed fiction-attribution dataset; synthetic validation alone is not sufficient.
-- Calibrate the acceptance probability and winner margin on real labeled scenes.
-- Benchmark TinyBERT thread counts and sequence length across representative Android phones.
-- Expand candidate extraction for aliases, titles, nested quotations, and non-English books.
-- Add model/version metadata to diagnostics and automated regression benchmarks.
-
 ### Consistent bundled neural voices
 
 If device-dependent Android voices are not good enough, add a `SpeechEngine` backed by
@@ -329,8 +296,8 @@ The concept is validated when a user can:
 3. enable speech and hear playback begin from the visible page with a short preparation state;
 4. see spoken text highlighted and pages advance automatically;
 5. navigate speech by sentence; and
-6. hear a bundled phone-sized classifier and deterministic rules keep recurring characters on
-   distinguishable voice variations without a server or internet connection.
+6. import a portable speaker map and hear recurring characters use distinguishable voice
+   variations without a server or internet connection during playback.
 
 ## Current validation
 
@@ -339,7 +306,7 @@ includes:
 
 - opening a real-world EPUB 2 file through an Android `ACTION_VIEW` content URI;
 - extracting and paginating the book text;
-- moving to the next page using the left tap zone;
+- moving to the next page using the right tap zone;
 - force-stopping and relaunching the app at the saved book and character offset;
 - showing the speech-preparation loader;
 - producing speech with the device's offline Android TTS voice;
@@ -347,6 +314,5 @@ includes:
 - highlighting the active spoken range; and
 - pausing playback without import, speech, or runtime errors in logcat.
 
-Desktop unit tests cover EPUB order/text extraction, sentence segmentation, and rule-based
-character attribution. A device instrumentation test separately exercises EPUB parsing with
-Android's platform XML implementation because it differs from the desktop JVM parser.
+Desktop unit tests cover EPUB order/text extraction, sentence segmentation, portable JSON
+validation, playback buffering, emotion delivery, and reader navigation helpers.

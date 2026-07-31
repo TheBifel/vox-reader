@@ -8,9 +8,7 @@ import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
-import com.bifel.voxreader.domain.preanalysis.ProviderBookResult
 import com.bifel.voxreader.domain.preanalysis.model.ATTRIBUTION_POLICY_VERSION
-import com.bifel.voxreader.domain.preanalysis.model.AnalysisRunId
 import com.bifel.voxreader.domain.preanalysis.model.AttributionSource
 import com.bifel.voxreader.domain.preanalysis.model.EvidenceKind
 import com.bifel.voxreader.domain.preanalysis.model.PHRASE_MANIFEST_VERSION
@@ -22,6 +20,11 @@ import com.bifel.voxreader.domain.preanalysis.model.SpeakerAttribution
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+data class ProviderBookResult(
+    val attributions: List<SpeakerAttribution>,
+    val characters: List<CharacterProfile>,
+)
 
 data class AnalysisSidecarMetadata(
     val bookId: String,
@@ -191,7 +194,7 @@ data class AnalysisSidecarBundle(
             )
         }
 
-    fun toProviderResult(runId: AnalysisRunId): ProviderBookResult {
+    fun toProviderResult(): ProviderBookResult {
         val characters = rows
             .distinctBy(AnalysisSidecarRow::speakerId)
             .map { row ->
@@ -216,7 +219,6 @@ data class AnalysisSidecarBundle(
             )
         }
         return ProviderBookResult(
-            runId = runId,
             attributions = attributions,
             characters = characters,
         )

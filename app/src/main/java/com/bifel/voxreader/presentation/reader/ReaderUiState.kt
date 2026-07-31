@@ -1,7 +1,6 @@
 package com.bifel.voxreader.presentation.reader
 
 import com.bifel.voxreader.domain.model.BookDocument
-import com.bifel.voxreader.domain.model.CharacterAnalysisSource
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.SpeechPhrase
@@ -33,7 +32,6 @@ data class ReaderUiState(
     val cachedAttributionProvider: String? = null,
     val cachedAttributionCoverage: Float = 0f,
     val analysisMessage: String? = null,
-    val lastAnalysisSource: CharacterAnalysisSource = CharacterAnalysisSource.RULES,
     val errorMessage: String? = null,
 ) {
     val readingProgress: Float

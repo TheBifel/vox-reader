@@ -10,11 +10,7 @@ import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.EmotionType
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.VoiceGroup
-import com.bifel.voxreader.domain.preanalysis.AttributionRepository
-import com.bifel.voxreader.domain.preanalysis.CharacterRegistryRepository
-import com.bifel.voxreader.domain.preanalysis.PreAnalysisRepository
 import com.bifel.voxreader.domain.preanalysis.model.ATTRIBUTION_POLICY_VERSION
-import com.bifel.voxreader.domain.preanalysis.model.AnalysisRun
 import com.bifel.voxreader.domain.preanalysis.model.AnalysisRunId
 import com.bifel.voxreader.domain.preanalysis.model.AnalysisRunStatus
 import com.bifel.voxreader.domain.preanalysis.model.AttributionRevision
@@ -24,39 +20,37 @@ import com.bifel.voxreader.domain.preanalysis.model.PHRASE_MANIFEST_VERSION
 import com.bifel.voxreader.domain.preanalysis.model.PROVIDER_SCHEMA_VERSION
 import com.bifel.voxreader.domain.preanalysis.model.PhraseId
 import com.bifel.voxreader.domain.preanalysis.model.PhraseManifestItem
-import com.bifel.voxreader.domain.preanalysis.model.PreAnalysisRequest
 import com.bifel.voxreader.domain.preanalysis.model.SEGMENTATION_VERSION
 import com.bifel.voxreader.domain.preanalysis.model.SpeakerAttribution
-import com.bifel.voxreader.domain.preanalysis.model.canTransitionTo
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
 
 class RoomPreAnalysisStore(
     private val database: VoxReaderDatabase,
     private val clock: () -> Long = System::currentTimeMillis,
-) : PreAnalysisRepository, AttributionRepository, CharacterRegistryRepository {
+) {
 
     private val runDao = database.analysisRunDao()
     private val manifestDao = database.phraseManifestDao()
     private val attributionDao = database.phraseAttributionDao()
     private val characterDao = database.characterDao()
 
-    override fun observeLatestRun(bookId: String): Flow<AnalysisRun?> =
-        runDao.observeLatest(bookId).map { it?.toDomain() }
-
-    override suspend fun createRun(request: PreAnalysisRequest): AnalysisRunId {
+    suspend fun createRun(
+        bookId: String,
+        providerId: String,
+        totalPhrases: Int,
+    ): AnalysisRunId {
         val id = AnalysisRunId(UUID.randomUUID().toString())
         val now = clock()
         runDao.upsert(
             AnalysisRunEntity(
                 runId = id.value,
-                bookId = request.bookId,
-                providerId = request.providerId,
-                providerModelId = null,
-                status = AnalysisRunStatus.QUEUED.name,
-                totalPhrases = 0,
+                bookId = bookId,
+                providerId = providerId,
+                providerModelId = providerId,
+                status = AnalysisRunStatus.PREPARING.name,
+                totalPhrases = totalPhrases,
                 completedPhrases = 0,
                 attributedPhrases = 0,
                 active = false,
@@ -74,19 +68,7 @@ class RoomPreAnalysisStore(
         return id
     }
 
-    override suspend fun requestCancellation(runId: AnalysisRunId) {
-        val current = runDao.find(runId.value) ?: return
-        val status = current.status.toRunStatus()
-        if (!status.canTransitionTo(AnalysisRunStatus.CANCELING)) return
-        runDao.updateStatus(
-            runId = runId.value,
-            status = AnalysisRunStatus.CANCELING.name,
-            cancelRequested = true,
-            updatedAt = clock(),
-        )
-    }
-
-    override fun observeActiveRevision(bookId: String): Flow<AttributionRevision?> =
+    fun observeActiveRevision(bookId: String): Flow<AttributionRevision?> =
         combine(
             runDao.observeActive(bookId),
             characterDao.observeActive(bookId),
@@ -107,53 +89,14 @@ class RoomPreAnalysisStore(
             }
         }
 
-    override suspend fun replaceManifest(
-        bookId: String,
-        items: List<PhraseManifestItem>,
-    ) {
-        database.withTransaction {
-            manifestDao.deleteForBook(bookId)
-            manifestDao.upsert(items.map { it.toEntity(bookId) })
-        }
-    }
-
     suspend fun manifest(bookId: String): List<PhraseManifestItem> =
         manifestDao.forBook(bookId).map { it.toDomain() }
-
-    override suspend fun findByPhraseIds(
-        bookId: String,
-        phraseIds: Collection<PhraseId>,
-    ): Map<PhraseId, SpeakerAttribution> {
-        if (phraseIds.isEmpty()) return emptyMap()
-        return attributionDao.activeForPhraseIds(
-            bookId = bookId,
-            phraseIds = phraseIds.map(PhraseId::value),
-        ).associate { entity ->
-            val attribution = entity.toDomain()
-            attribution.phraseId to attribution
-        }
-    }
 
     suspend fun activeAttributions(bookId: String): Map<PhraseId, SpeakerAttribution> =
         attributionDao.activeForBook(bookId).associate { entity ->
             val attribution = entity.toDomain()
             attribution.phraseId to attribution
         }
-
-    override suspend fun activateRevision(runId: AnalysisRunId) {
-        database.withTransaction {
-            val run = requireNotNull(runDao.find(runId.value)) {
-                "Unknown analysis run ${runId.value}"
-            }
-            val status = run.status.toRunStatus()
-            require(status == AnalysisRunStatus.READY || status == AnalysisRunStatus.PARTIAL) {
-                "Only a validated READY or PARTIAL revision can be activated."
-            }
-            val now = clock()
-            runDao.deactivateBook(run.bookId, now)
-            runDao.activate(run.runId, now)
-        }
-    }
 
     suspend fun activateRevisionWithManifest(
         runId: AnalysisRunId,
@@ -175,38 +118,12 @@ class RoomPreAnalysisStore(
         }
     }
 
-    override suspend fun characters(
-        bookId: String,
-        runId: AnalysisRunId?,
-    ): List<CharacterProfile> {
-        val resolvedRunId = runId?.value ?: runDao.findActive(bookId)?.runId ?: return emptyList()
-        return characterDao.forRun(bookId, resolvedRunId).map { it.toDomain() }
-    }
-
-    override suspend fun upsertCharacters(
+    suspend fun upsertCharacters(
         bookId: String,
         runId: AnalysisRunId,
         characters: List<CharacterProfile>,
     ) {
         characterDao.upsert(characters.map { it.toEntity(bookId, runId.value) })
-    }
-
-    suspend fun prepareRun(
-        runId: AnalysisRunId,
-        totalPhrases: Int,
-        providerModelId: String?,
-    ) {
-        val current = requireNotNull(runDao.find(runId.value))
-        val next = AnalysisRunStatus.PREPARING
-        require(current.status.toRunStatus().canTransitionTo(next))
-        runDao.upsert(
-            current.copy(
-                providerModelId = providerModelId,
-                status = next.name,
-                totalPhrases = totalPhrases,
-                updatedAt = clock(),
-            ),
-        )
     }
 
     suspend fun stageValidatedRevision(
@@ -237,21 +154,6 @@ class RoomPreAnalysisStore(
             )
         }
     }
-
-    private fun AnalysisRunEntity.toDomain(): AnalysisRun =
-        AnalysisRun(
-            id = AnalysisRunId(runId),
-            bookId = bookId,
-            providerId = providerId,
-            status = status.toRunStatus(),
-            totalPhrases = totalPhrases,
-            completedPhrases = completedPhrases,
-            attributedPhrases = attributedPhrases,
-            active = active,
-            createdAt = createdAt,
-            updatedAt = updatedAt,
-            safeErrorCode = safeErrorCode,
-        )
 
     private fun PhraseManifestItem.toEntity(bookId: String) =
         PhraseManifestEntity(
