@@ -12,6 +12,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 data class ParsedEpub(
     val title: String,
     val text: String,
+    val chapterStarts: List<Int>,
 )
 
 class EpubParser {
@@ -74,12 +75,30 @@ class EpubParser {
                 .replace(Regex("""[ \t]+\n"""), "\n")
                 .replace(Regex("""\n{3,}"""), "\n\n")
                 .trim()
+            var chapterSearchStart = 0
+            val chapterStarts = chapters.mapNotNull { chapter ->
+                val normalizedChapter = chapter
+                    .replace(Regex("""[ \t]+\n"""), "\n")
+                    .replace(Regex("""\n{3,}"""), "\n\n")
+                    .trim()
+                val start = bookText.indexOf(normalizedChapter, startIndex = chapterSearchStart)
+                if (start < 0) {
+                    null
+                } else {
+                    chapterSearchStart = start + normalizedChapter.length
+                    start
+                }
+            }.distinct()
 
             require(bookText.isNotBlank()) {
                 "No readable text was found. DRM-protected and image-only EPUB files are not supported."
             }
 
-            return ParsedEpub(title = title, text = bookText)
+            return ParsedEpub(
+                title = title,
+                text = bookText,
+                chapterStarts = chapterStarts.ifEmpty { listOf(0) },
+            )
         }
     }
 

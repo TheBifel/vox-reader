@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -42,7 +44,6 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
@@ -63,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
@@ -85,6 +87,7 @@ import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.presentation.theme.ReaderHighlight
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -432,6 +435,14 @@ private fun ReaderContent(
     onSetPlaybackSpeed: (Float) -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
 ) {
+    var calculatedPages by remember(state.book?.id) {
+        mutableStateOf<List<PageLayout>>(emptyList())
+    }
+    val currentPageIndex = PageNavigation.currentPageIndex(
+        pages = calculatedPages,
+        textOffset = state.pageStart,
+    )
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -449,6 +460,7 @@ private fun ReaderContent(
                 darkTheme = state.darkTheme,
                 onToggleChrome = onToggleChrome,
                 onPageChanged = onPageChanged,
+                onPagesCalculated = { calculatedPages = it },
                 modifier = Modifier.weight(1f),
             )
 
@@ -463,13 +475,14 @@ private fun ReaderContent(
                 )
             }
 
-            LinearProgressIndicator(
-                progress = { state.readingProgress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp),
-                color = MaterialTheme.colorScheme.primary,
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            BookProgressNavigation(
+                book = requireNotNull(state.book),
+                pages = calculatedPages,
+                currentPageIndex = currentPageIndex,
+                fallbackProgress = state.readingProgress,
+                onSeekPage = { page ->
+                    onPageChanged(page.start, page.end, true)
+                },
             )
             Spacer(
                 Modifier
@@ -504,6 +517,7 @@ private fun PaginatedBookPage(
     darkTheme: Boolean,
     onToggleChrome: () -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
+    onPagesCalculated: (List<PageLayout>) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -544,6 +558,20 @@ private fun PaginatedBookPage(
 
         LaunchedEffect(book.id, requestedPageStart, widthPx, heightPx, phrases.size) {
             showPage(forward(requestedPageStart), userInitiated = false)
+        }
+
+        LaunchedEffect(book.id, widthPx, heightPx, phrases.size) {
+            onPagesCalculated(emptyList())
+            val pages = mutableListOf<PageLayout>()
+            var anchor = 0
+            while (anchor < book.text.length) {
+                val next = forward(anchor)
+                if (next.end <= anchor) break
+                pages += next
+                anchor = next.end
+                if (pages.size % PAGINATION_YIELD_INTERVAL == 0) yield()
+            }
+            onPagesCalculated(pages)
         }
 
         LaunchedEffect(highlightStart, highlightEnd, page.start, page.end) {
@@ -608,6 +636,107 @@ private fun PaginatedBookPage(
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+}
+
+@Composable
+private fun BookProgressNavigation(
+    book: BookDocument,
+    pages: List<PageLayout>,
+    currentPageIndex: Int,
+    fallbackProgress: Float,
+    onSeekPage: (PageLayout) -> Unit,
+) {
+    var isSeeking by remember(book.id) { mutableStateOf(false) }
+    var draftPageIndex by remember(book.id) { mutableStateOf(0f) }
+    val safeCurrentPageIndex = currentPageIndex.coerceIn(
+        0,
+        pages.lastIndex.coerceAtLeast(0),
+    )
+    LaunchedEffect(safeCurrentPageIndex, pages.size) {
+        if (!isSeeking) draftPageIndex = safeCurrentPageIndex.toFloat()
+    }
+
+    val displayPageIndex = if (isSeeking) {
+        draftPageIndex.roundToInt().coerceIn(0, pages.lastIndex.coerceAtLeast(0))
+    } else {
+        safeCurrentPageIndex
+    }
+    val percentage = if (pages.isEmpty()) {
+        (fallbackProgress.coerceIn(0f, 1f) * 100f).roundToInt()
+    } else {
+        PageNavigation.percentage(displayPageIndex, pages.size)
+    }
+    val chapterFractions = remember(book.chapterStarts, pages) {
+        PageNavigation.chapterFractions(book.chapterStarts, pages)
+    }
+    val chapterTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(38.dp)
+            .padding(horizontal = 16.dp),
+    ) {
+        Text(
+            text = "$percentage%",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(46.dp),
+        )
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .weight(1f)
+                .height(38.dp),
+        ) {
+            Slider(
+                value = draftPageIndex.coerceIn(
+                    0f,
+                    pages.lastIndex.coerceAtLeast(1).toFloat(),
+                ),
+                onValueChange = { value ->
+                    isSeeking = true
+                    draftPageIndex = value.roundToInt().toFloat()
+                },
+                onValueChangeFinished = {
+                    pages.getOrNull(draftPageIndex.roundToInt())?.let(onSeekPage)
+                    isSeeking = false
+                },
+                valueRange = 0f..pages.lastIndex.coerceAtLeast(1).toFloat(),
+                enabled = pages.size > 1,
+                modifier = Modifier.fillMaxSize(),
+            )
+            Canvas(Modifier.fillMaxSize()) {
+                val centerY = size.height / 2f
+                val halfTick = 5.dp.toPx()
+                val tickWidth = 1.dp.toPx()
+                val trackInset = 10.dp.toPx()
+                val trackWidth = (size.width - (trackInset * 2f)).coerceAtLeast(0f)
+                chapterFractions.forEach { fraction ->
+                    val x = trackInset + (fraction.coerceIn(0f, 1f) * trackWidth)
+                    drawLine(
+                        color = chapterTickColor,
+                        start = androidx.compose.ui.geometry.Offset(x, centerY - halfTick),
+                        end = androidx.compose.ui.geometry.Offset(x, centerY + halfTick),
+                        strokeWidth = tickWidth,
+                        cap = StrokeCap.Butt,
+                    )
+                }
+            }
+        }
+        Text(
+            text = if (pages.isEmpty()) {
+                "…/…"
+            } else {
+                "${displayPageIndex + 1}/${pages.size}"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.End,
+            modifier = Modifier.width(72.dp),
+        )
     }
 }
 
@@ -731,6 +860,7 @@ private fun includeAdjacentClosingQuotes(
 
 private const val COMPLETE_CACHE_THRESHOLD = 0.999f
 private const val GOLDEN_ANGLE_DEGREES = 137.50776f
+private const val PAGINATION_YIELD_INTERVAL = 8
 private val BOOK_QUOTE_MARKS = setOf('"', '\u201c', '\u201d', '\u201e', '\u00ab', '\u00bb')
 
 private fun formatCoverage(coverage: Float): String {

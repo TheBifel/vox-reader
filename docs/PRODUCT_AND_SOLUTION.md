@@ -54,8 +54,11 @@ The tap zones follow conventional left-to-right navigation:
 - tap the middle third to reveal or hide the reader header;
 - use the header's hamburger button to open reader settings.
 
-A thin progress bar at the bottom represents the current character offset as a proportion of the
-book's total extracted text.
+The bottom progress control is based on the pages calculated for the current viewport. It shows the
+current percentage on the left and the current/total page count on the right. Dragging its slider
+seeks to a page, while short perpendicular markers identify EPUB spine/chapter boundaries. The
+control keeps a 16 dp margin from both screen edges. Page counts and chapter markers are recalculated
+when the available page size changes.
 
 ### Appearance and speech controls
 
@@ -300,7 +303,7 @@ consistent across phones while preserving the same ViewModel, controls, and high
 ### Product features beyond the POC
 
 - in-app library and file picker;
-- chapter navigation and table of contents;
+- chapter names and direct table-of-contents navigation;
 - bookmarks, notes, search, and selectable text;
 - configurable tap direction and gestures;
 - background playback and media notification controls;

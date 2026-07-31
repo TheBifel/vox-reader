@@ -5,6 +5,7 @@ data class BookDocument(
     val title: String,
     val localPath: String,
     val text: String,
+    val chapterStarts: List<Int> = listOf(0),
 )
 
 data class StoredBook(

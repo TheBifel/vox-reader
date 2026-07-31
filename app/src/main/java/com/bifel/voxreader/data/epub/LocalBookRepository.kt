@@ -66,10 +66,10 @@ class LocalBookRepository(
             title = title,
             localPath = file.absolutePath,
             text = text,
+            chapterStarts = chapterStarts,
         )
 
     private companion object {
         const val BOOKS_DIRECTORY = "books"
     }
 }
-
