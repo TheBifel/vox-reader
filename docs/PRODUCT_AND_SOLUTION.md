@@ -42,8 +42,9 @@ is bundled with the application and needs no separate installation.
 
 ### Reading
 
-The EPUB text is laid out into viewport-sized pages. Pagination is calculated from the actual
-Compose text measurements, screen dimensions, and reader typography. The stored position is a
+The EPUB text is laid out into viewport-sized pages. Only the visible page is measured, with the
+previous and next pages prepared as adjacent cache entries. VoxReader never lays out the entire
+book during opening or when speech controls change the viewport. The stored position is a
 character offset rather than a fragile page number, allowing the page to be reconstructed after a
 screen-size or orientation change.
 
@@ -54,11 +55,17 @@ The tap zones follow conventional left-to-right navigation:
 - tap the middle third to reveal or hide the reader header;
 - use the header's hamburger button to open reader settings.
 
-The bottom progress control is based on the pages calculated for the current viewport. It shows the
-current percentage on the left and the current/total page count on the right. Dragging its slider
-seeks to a page, while short perpendicular markers identify EPUB spine/chapter boundaries. The
-control keeps a 16 dp margin from both screen edges. Page counts and chapter markers are recalculated
-when the available page size changes.
+The bottom progress control maps the saved character offset to an estimated page number using the
+measured size of the current viewport. This is intentionally an estimate, like established EPUB
+readers, and avoids a blocking whole-book pagination pass. It shows the current percentage on the
+left and current/estimated-total pages on the right. Dragging seeks through text offsets, while
+short perpendicular markers map EPUB spine/chapter offsets onto the same scale. The control keeps
+a 16 dp margin from both screen edges and updates when the available page size changes.
+
+Imported speaker colors are also viewport-local: binary search selects only phrases overlapping
+the visible page. Narration remains uncolored. An unresolved cached `unknown` phrase receives its
+own stable color so incomplete external analysis is visible and debuggable instead of looking like
+narration.
 
 ### Appearance and speech controls
 
@@ -165,8 +172,9 @@ com.bifel.voxreader
 - exposing immutable `ReaderUiState`.
 
 Compose owns layout-specific state that cannot exist independently of the UI, notably the measured
-end of a page. The UI reports each calculated page range to the ViewModel, which persists the
-corresponding character offset.
+current page and adjacent-page cache. The UI reports each displayed page range to the ViewModel,
+which persists the corresponding character offset. Phrase and page-boundary searches use binary
+lookup over their ordered manifests rather than whole-book scans.
 
 Data implementations do not leak into the ViewModel. It depends on interfaces such as
 `BookRepository`, `LibraryRepository`, `CharacterAnalyzer`, and `SpeechEngine`.

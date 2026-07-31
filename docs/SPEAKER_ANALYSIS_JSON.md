@@ -18,8 +18,9 @@ that book. The reader does not depend on the producer.
 5. Choose **Import speaker analysis JSON**.
 6. VoxReader validates the complete document before activating it.
 
-Known cached speakers immediately receive stable per-character highlight colors. Narration and
-unknown phrases remain uncolored. The active playback highlight is drawn more strongly.
+Known cached speakers immediately receive stable per-character highlight colors. Narration remains
+uncolored; unresolved `unknown` phrases receive a stable diagnostic color so gaps in the external
+analysis are visible on the page. The active playback highlight is drawn more strongly.
 
 The updated book-labeling tool may also create the JSON directly from the exact EPUB file. If its
 book hash and immutable phrase data validate, VoxReader adopts that JSON phrase manifest for the
@@ -112,7 +113,8 @@ VoxReader rejects unsupported or mismatched versions.
 | `emotion` | Yes | Optional object containing `type`, `intensity`, and `confidence`. |
 
 Use `unknown`, `Unknown`, `NEUTRAL`, and confidence `0` for unresolved phrases. Unknown objects
-remain authoritative cached decisions but are intentionally displayed without a speaker color.
+remain authoritative cached decisions and are displayed with a stable diagnostic color distinct
+from uncolored narration.
 
 Emotion `intensity` is in `0..1`, and emotion `confidence` must be in `0.85..1`. The accepted
 emotion types are `JOY`, `SADNESS`, `ANGER`, `FEAR`, `SURPRISE`, `DISGUST`, `TENSION`,

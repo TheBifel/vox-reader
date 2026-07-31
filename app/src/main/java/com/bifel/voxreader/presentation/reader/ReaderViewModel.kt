@@ -245,10 +245,9 @@ class ReaderViewModel(
                     storedBook?.voiceOverrides.orEmpty().forEach { override ->
                         portableAnalysisService.updateVoiceProfile(book.id, override)
                     }
-                    val cached = portableAnalysisService.cached(
-                        book = book,
-                        phrases = SentenceSegmenter.segment(book.text),
-                    )
+                    val cached = portableAnalysisService.cached(book) {
+                        SentenceSegmenter.segment(book.text)
+                    }
                     result to cached
                 }
             }.onSuccess { (result, cached) ->
@@ -316,9 +315,10 @@ class ReaderViewModel(
     ) {
         storedBook = stored
         analyzedPhraseRanges.clear()
-        val segmentedPhrases = SentenceSegmenter.segment(document.text)
         val cached = withContext(Dispatchers.Default) {
-            portableAnalysisService.cached(document, segmentedPhrases)
+            portableAnalysisService.cached(document) {
+                SentenceSegmenter.segment(document.text)
+            }
         }
         val phrases = cached.phrases
         val baseCharacters = if (cached.providerId != null) {

@@ -61,6 +61,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -81,13 +82,11 @@ import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterAnalysisSource
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
-import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.presentation.theme.ReaderHighlight
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -115,7 +114,7 @@ fun ReaderScreen(
     val speakerColorSlots = remember(state.characters) {
         state.characters
             .asSequence()
-            .filter { it.id != NARRATOR_ID && it.id != UNKNOWN_SPEAKER_ID }
+            .filter { it.id != NARRATOR_ID }
             .map { it.id }
             .distinct()
             .sorted()
@@ -364,12 +363,12 @@ private fun VoiceProfileList(
         .filter { SpeechText.isSpeakable(it.text) }
         .filter { it.index in state.cachedSpeakerPhraseIndices }
         .map(SpeechPhrase::speakerId)
-        .filter { it != NARRATOR_ID && it != UNKNOWN_SPEAKER_ID }
+        .filter { it != NARRATOR_ID }
         .toSet()
     val speakers = state.characters
         .filter {
             it.id == NARRATOR_ID ||
-                (it.id in cachedSpeakerIds && it.id != UNKNOWN_SPEAKER_ID)
+                it.id in cachedSpeakerIds
         }
         .sortedWith(compareBy({ it.id != NARRATOR_ID }, { it.displayName }))
     if (speakers.isEmpty()) return
@@ -435,13 +434,13 @@ private fun ReaderContent(
     onSetPlaybackSpeed: (Float) -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
 ) {
-    var calculatedPages by remember(state.book?.id) {
-        mutableStateOf<List<PageLayout>>(emptyList())
+    var displayedPage by remember(state.book?.id) {
+        mutableStateOf(PageLayout(state.pageStart, state.pageEnd))
     }
-    val currentPageIndex = PageNavigation.currentPageIndex(
-        pages = calculatedPages,
-        textOffset = state.pageStart,
-    )
+    var estimatedCharactersPerPage by remember(
+        state.book?.id,
+        state.speechControlsEnabled,
+    ) { mutableStateOf(500) }
 
     Box(
         modifier = Modifier
@@ -460,7 +459,8 @@ private fun ReaderContent(
                 darkTheme = state.darkTheme,
                 onToggleChrome = onToggleChrome,
                 onPageChanged = onPageChanged,
-                onPagesCalculated = { calculatedPages = it },
+                onPageDisplayed = { displayedPage = it },
+                onPageSizeEstimated = { estimatedCharactersPerPage = it },
                 modifier = Modifier.weight(1f),
             )
 
@@ -477,11 +477,10 @@ private fun ReaderContent(
 
             BookProgressNavigation(
                 book = requireNotNull(state.book),
-                pages = calculatedPages,
-                currentPageIndex = currentPageIndex,
-                fallbackProgress = state.readingProgress,
-                onSeekPage = { page ->
-                    onPageChanged(page.start, page.end, true)
+                displayedPage = displayedPage,
+                charactersPerPage = estimatedCharactersPerPage,
+                onSeekOffset = { offset ->
+                    onPageChanged(offset, offset, true)
                 },
             )
             Spacer(
@@ -517,7 +516,8 @@ private fun PaginatedBookPage(
     darkTheme: Boolean,
     onToggleChrome: () -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
-    onPagesCalculated: (List<PageLayout>) -> Unit,
+    onPageDisplayed: (PageLayout) -> Unit,
+    onPageSizeEstimated: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -540,6 +540,15 @@ private fun PaginatedBookPage(
         var page by remember(book.id, widthPx, heightPx) {
             mutableStateOf(PageLayout(requestedPageStart, requestedPageStart))
         }
+        var previousPage by remember(book.id, widthPx, heightPx) {
+            mutableStateOf<PageLayout?>(null)
+        }
+        var nextPage by remember(book.id, widthPx, heightPx) {
+            mutableStateOf<PageLayout?>(null)
+        }
+        var pageSizeReported by remember(book.id, widthPx, heightPx) {
+            mutableStateOf(false)
+        }
 
         fun forward(anchor: Int): PageLayout = PageCalculator.forward(
             text = book.text,
@@ -553,25 +562,48 @@ private fun PaginatedBookPage(
 
         fun showPage(layout: PageLayout, userInitiated: Boolean) {
             page = layout
+            onPageDisplayed(layout)
+            if (!pageSizeReported && layout.end > layout.start) {
+                pageSizeReported = true
+                onPageSizeEstimated(layout.end - layout.start)
+            }
             onPageChanged(layout.start, layout.end, userInitiated)
         }
 
         LaunchedEffect(book.id, requestedPageStart, widthPx, heightPx, phrases.size) {
-            showPage(forward(requestedPageStart), userInitiated = false)
+            val layout = if (book.text.isNotEmpty() && requestedPageStart >= book.text.lastIndex) {
+                PageCalculator.backward(
+                    text = book.text,
+                    currentStart = book.text.length,
+                    phrases = phrases,
+                    textMeasurer = textMeasurer,
+                    style = pageStyle,
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                )
+            } else {
+                forward(requestedPageStart)
+            }
+            showPage(layout, userInitiated = false)
         }
 
-        LaunchedEffect(book.id, widthPx, heightPx, phrases.size) {
-            onPagesCalculated(emptyList())
-            val pages = mutableListOf<PageLayout>()
-            var anchor = 0
-            while (anchor < book.text.length) {
-                val next = forward(anchor)
-                if (next.end <= anchor) break
-                pages += next
-                anchor = next.end
-                if (pages.size % PAGINATION_YIELD_INTERVAL == 0) yield()
+        LaunchedEffect(book.id, page.start, page.end, widthPx, heightPx, phrases.size) {
+            withFrameNanos { }
+            previousPage = if (page.start > 0) {
+                PageCalculator.backward(
+                    text = book.text,
+                    currentStart = page.start,
+                    phrases = phrases,
+                    textMeasurer = textMeasurer,
+                    style = pageStyle,
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                )
+            } else {
+                null
             }
-            onPagesCalculated(pages)
+            withFrameNanos { }
+            nextPage = if (page.end in 1 until book.text.length) forward(page.end) else null
         }
 
         LaunchedEffect(highlightStart, highlightEnd, page.start, page.end) {
@@ -606,15 +638,16 @@ private fun PaginatedBookPage(
                 onClick = {
                     if (page.start > 0) {
                         showPage(
-                            PageCalculator.backward(
-                                text = book.text,
-                                currentStart = page.start,
-                                phrases = phrases,
-                                textMeasurer = textMeasurer,
-                                style = pageStyle,
-                                widthPx = widthPx,
-                                heightPx = heightPx,
-                            ),
+                            previousPage?.takeIf { it.end == page.start }
+                                ?: PageCalculator.backward(
+                                    text = book.text,
+                                    currentStart = page.start,
+                                    phrases = phrases,
+                                    textMeasurer = textMeasurer,
+                                    style = pageStyle,
+                                    widthPx = widthPx,
+                                    heightPx = heightPx,
+                                ),
                             userInitiated = true,
                         )
                     }
@@ -630,7 +663,10 @@ private fun PaginatedBookPage(
                 label = "Next page",
                 onClick = {
                     if (page.end < book.text.length) {
-                        showPage(forward(page.end), userInitiated = true)
+                        showPage(
+                            nextPage?.takeIf { it.start == page.end } ?: forward(page.end),
+                            userInitiated = true,
+                        )
                     }
                 },
                 modifier = Modifier.weight(1f),
@@ -642,33 +678,35 @@ private fun PaginatedBookPage(
 @Composable
 private fun BookProgressNavigation(
     book: BookDocument,
-    pages: List<PageLayout>,
-    currentPageIndex: Int,
-    fallbackProgress: Float,
-    onSeekPage: (PageLayout) -> Unit,
+    displayedPage: PageLayout,
+    charactersPerPage: Int,
+    onSeekOffset: (Int) -> Unit,
 ) {
     var isSeeking by remember(book.id) { mutableStateOf(false) }
-    var draftPageIndex by remember(book.id) { mutableStateOf(0f) }
-    val safeCurrentPageIndex = currentPageIndex.coerceIn(
-        0,
-        pages.lastIndex.coerceAtLeast(0),
+    var draftFraction by remember(book.id) { mutableStateOf(0f) }
+    val pageEstimate = PageNavigation.estimate(
+        pageStart = displayedPage.start,
+        pageEnd = displayedPage.end,
+        textLength = book.text.length,
+        charactersPerPage = charactersPerPage,
     )
-    LaunchedEffect(safeCurrentPageIndex, pages.size) {
-        if (!isSeeking) draftPageIndex = safeCurrentPageIndex.toFloat()
+    LaunchedEffect(pageEstimate, charactersPerPage) {
+        if (!isSeeking) draftFraction = pageEstimate.progressFraction
     }
 
-    val displayPageIndex = if (isSeeking) {
-        draftPageIndex.roundToInt().coerceIn(0, pages.lastIndex.coerceAtLeast(0))
+    val displayEstimate = if (isSeeking && pageEstimate.totalPages > 0) {
+        val page = (draftFraction.coerceIn(0f, 1f) * (pageEstimate.totalPages - 1))
+            .roundToInt() + 1
+        PageEstimate(currentPage = page, totalPages = pageEstimate.totalPages)
     } else {
-        safeCurrentPageIndex
+        pageEstimate
     }
-    val percentage = if (pages.isEmpty()) {
-        (fallbackProgress.coerceIn(0f, 1f) * 100f).roundToInt()
-    } else {
-        PageNavigation.percentage(displayPageIndex, pages.size)
-    }
-    val chapterFractions = remember(book.chapterStarts, pages) {
-        PageNavigation.chapterFractions(book.chapterStarts, pages)
+    val chapterFractions = remember(book.chapterStarts, book.text.length, charactersPerPage) {
+        PageNavigation.chapterFractions(
+            chapterStarts = book.chapterStarts,
+            textLength = book.text.length,
+            charactersPerPage = charactersPerPage,
+        )
     }
     val chapterTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
 
@@ -680,7 +718,7 @@ private fun BookProgressNavigation(
             .padding(horizontal = 16.dp),
     ) {
         Text(
-            text = "$percentage%",
+            text = "${displayEstimate.percentage}%",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.width(46.dp),
@@ -692,20 +730,23 @@ private fun BookProgressNavigation(
                 .height(38.dp),
         ) {
             Slider(
-                value = draftPageIndex.coerceIn(
-                    0f,
-                    pages.lastIndex.coerceAtLeast(1).toFloat(),
-                ),
+                value = draftFraction.coerceIn(0f, 1f),
                 onValueChange = { value ->
                     isSeeking = true
-                    draftPageIndex = value.roundToInt().toFloat()
+                    draftFraction = value
                 },
                 onValueChangeFinished = {
-                    pages.getOrNull(draftPageIndex.roundToInt())?.let(onSeekPage)
+                    onSeekOffset(
+                        PageNavigation.offsetForFraction(
+                            fraction = draftFraction,
+                            textLength = book.text.length,
+                            charactersPerPage = charactersPerPage,
+                        ),
+                    )
                     isSeeking = false
                 },
-                valueRange = 0f..pages.lastIndex.coerceAtLeast(1).toFloat(),
-                enabled = pages.size > 1,
+                valueRange = 0f..1f,
+                enabled = pageEstimate.totalPages > 1,
                 modifier = Modifier.fillMaxSize(),
             )
             Canvas(Modifier.fillMaxSize()) {
@@ -727,10 +768,10 @@ private fun BookProgressNavigation(
             }
         }
         Text(
-            text = if (pages.isEmpty()) {
+            text = if (displayEstimate.totalPages == 0) {
                 "…/…"
             } else {
-                "${displayPageIndex + 1}/${pages.size}"
+                "${displayEstimate.currentPage}/${displayEstimate.totalPages}"
             },
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -773,43 +814,44 @@ private fun highlightedPage(
     val pageText = text.substring(page.start, page.end)
     append(pageText)
 
-    val phrasesByIndex = phrases.associateBy(SpeechPhrase::index)
-    phrases.asSequence()
-        .filter { phrase ->
-            SpeechText.isSpeakable(phrase.text) &&
+    PhraseLookup.overlappingRange(phrases, page.start, page.end)
+        ?.forEach { position ->
+            val phrase = phrases[position]
+            if (
+                SpeechText.isSpeakable(phrase.text) &&
                 phrase.index in cachedSpeakerPhraseIndices &&
                 phrase.speakerId != NARRATOR_ID &&
-                phrase.speakerId != UNKNOWN_SPEAKER_ID &&
                 phrase.end > page.start &&
                 phrase.start < page.end
-        }
-        .forEach { phrase ->
-            val phraseStart = includeAdjacentOpeningQuotes(text, phrase.start)
-                .coerceIn(page.start, page.end) - page.start
-            val nextPhrase = phrasesByIndex[phrase.index + 1]
-            val absoluteEnd = if (
-                nextPhrase != null &&
-                nextPhrase.index in cachedSpeakerPhraseIndices &&
-                nextPhrase.speakerId == phrase.speakerId
             ) {
-                nextPhrase.start
-            } else {
-                phrase.end
-            }
-            val phraseEnd = includeAdjacentClosingQuotes(text, absoluteEnd)
-                .coerceIn(page.start, page.end) - page.start
-            if (phraseEnd > phraseStart) {
-                addStyle(
-                    style = SpanStyle(
-                        background = speakerHighlightColor(
-                            colorSlot = speakerColorSlots[phrase.speakerId]
-                                ?: stableColorSlot(phrase.speakerId),
-                            darkTheme = darkTheme,
+                val phraseStart = includeAdjacentOpeningQuotes(text, phrase.start)
+                    .coerceIn(page.start, page.end) - page.start
+                val nextPhrase = phrases.getOrNull(position + 1)
+                val absoluteEnd = if (
+                    nextPhrase != null &&
+                    nextPhrase.index == phrase.index + 1 &&
+                    nextPhrase.index in cachedSpeakerPhraseIndices &&
+                    nextPhrase.speakerId == phrase.speakerId
+                ) {
+                    nextPhrase.start
+                } else {
+                    phrase.end
+                }
+                val phraseEnd = includeAdjacentClosingQuotes(text, absoluteEnd)
+                    .coerceIn(page.start, page.end) - page.start
+                if (phraseEnd > phraseStart) {
+                    addStyle(
+                        style = SpanStyle(
+                            background = speakerHighlightColor(
+                                colorSlot = speakerColorSlots[phrase.speakerId]
+                                    ?: stableColorSlot(phrase.speakerId),
+                                darkTheme = darkTheme,
+                            ),
                         ),
-                    ),
-                    start = phraseStart,
-                    end = phraseEnd,
-                )
+                        start = phraseStart,
+                        end = phraseEnd,
+                    )
+                }
             }
         }
 
@@ -860,7 +902,6 @@ private fun includeAdjacentClosingQuotes(
 
 private const val COMPLETE_CACHE_THRESHOLD = 0.999f
 private const val GOLDEN_ANGLE_DEGREES = 137.50776f
-private const val PAGINATION_YIELD_INTERVAL = 8
 private val BOOK_QUOTE_MARKS = setOf('"', '\u201c', '\u201d', '\u201e', '\u00ab', '\u00bb')
 
 private fun formatCoverage(coverage: Float): String {

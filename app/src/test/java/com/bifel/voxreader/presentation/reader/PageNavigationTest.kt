@@ -5,37 +5,54 @@ import org.junit.Test
 
 class PageNavigationTest {
 
-    private val pages = listOf(
-        PageLayout(0, 100),
-        PageLayout(100, 220),
-        PageLayout(220, 350),
-        PageLayout(350, 500),
-        PageLayout(500, 650),
-    )
-
     @Test
-    fun `finds the page containing or preceding an offset`() {
-        assertEquals(0, PageNavigation.currentPageIndex(pages, 0))
-        assertEquals(1, PageNavigation.currentPageIndex(pages, 150))
-        assertEquals(3, PageNavigation.currentPageIndex(pages, 499))
-        assertEquals(4, PageNavigation.currentPageIndex(pages, 999))
-    }
-
-    @Test
-    fun `reports progress from first to last page`() {
-        assertEquals(0, PageNavigation.percentage(pageIndex = 0, pageCount = 5))
-        assertEquals(50, PageNavigation.percentage(pageIndex = 2, pageCount = 5))
-        assertEquals(100, PageNavigation.percentage(pageIndex = 4, pageCount = 5))
-    }
-
-    @Test
-    fun `maps chapter starts to distinct interior page ticks`() {
+    fun `estimates progress without a complete page map`() {
         assertEquals(
-            listOf(0.25f, 0.5f, 0.75f),
-            PageNavigation.chapterFractions(
-                chapterStarts = listOf(0, 100, 150, 220, 350, 650),
-                pages = pages,
+            PageEstimate(currentPage = 1, totalPages = 5),
+            PageNavigation.estimate(
+                pageStart = 0,
+                pageEnd = 100,
+                textLength = 500,
+                charactersPerPage = 100,
+            ),
+        )
+        assertEquals(
+            PageEstimate(currentPage = 3, totalPages = 5),
+            PageNavigation.estimate(
+                pageStart = 220,
+                pageEnd = 320,
+                textLength = 500,
+                charactersPerPage = 100,
+            ),
+        )
+        assertEquals(
+            PageEstimate(currentPage = 5, totalPages = 5),
+            PageNavigation.estimate(
+                pageStart = 410,
+                pageEnd = 500,
+                textLength = 500,
+                charactersPerPage = 100,
             ),
         )
     }
+
+    @Test
+    fun `maps slider positions back to estimated text offsets`() {
+        assertEquals(0, PageNavigation.offsetForFraction(0f, 500, 100))
+        assertEquals(200, PageNavigation.offsetForFraction(0.5f, 500, 100))
+        assertEquals(499, PageNavigation.offsetForFraction(1f, 500, 100))
+    }
+
+    @Test
+    fun `maps chapters to distinct interior estimated pages`() {
+        assertEquals(
+            listOf(0.25f, 0.5f, 0.75f),
+            PageNavigation.chapterFractions(
+                chapterStarts = listOf(0, 100, 150, 200, 300, 500),
+                textLength = 500,
+                charactersPerPage = 100,
+            ),
+        )
+    }
+
 }

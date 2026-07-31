@@ -212,9 +212,9 @@ internal class WordPieceTokenizer(
         val secondTokens = tokenize(second).toMutableList()
         while (firstTokens.size + secondTokens.size > maxLength - SPECIAL_PAIR_TOKENS) {
             if (firstTokens.size > secondTokens.size) {
-                firstTokens.removeLast()
+                firstTokens.removeAt(firstTokens.lastIndex)
             } else {
-                secondTokens.removeLast()
+                secondTokens.removeAt(secondTokens.lastIndex)
             }
         }
 

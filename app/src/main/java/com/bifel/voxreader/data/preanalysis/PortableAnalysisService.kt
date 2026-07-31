@@ -129,17 +129,27 @@ class PortableAnalysisService(
     suspend fun cached(
         book: BookDocument,
         phrases: List<SpeechPhrase>,
+    ): CachedAnalysis = cached(book) { phrases }
+
+    /**
+     * Restores a persisted phrase manifest without re-segmenting the whole book. The fallback is
+     * evaluated only for books that have no usable cached manifest.
+     */
+    suspend fun cached(
+        book: BookDocument,
+        fallbackPhrases: () -> List<SpeechPhrase>,
     ): CachedAnalysis {
         val revision = store.observeActiveRevision(book.id).first()
-            ?: return CachedAnalysis.empty(phrases)
+            ?: return CachedAnalysis.empty(fallbackPhrases())
         val storedManifest = store.manifest(book.id)
         val storedPhrases = storedManifest.toSpeechPhrases(book.text)
+        val fallback = if (storedPhrases == null) fallbackPhrases() else null
         val manifest = if (storedPhrases != null) {
             storedManifest
         } else {
-            PhraseManifestBuilder.build(book.id, phrases)
+            PhraseManifestBuilder.build(book.id, requireNotNull(fallback))
         }
-        val basePhrases = storedPhrases ?: phrases
+        val basePhrases = storedPhrases ?: requireNotNull(fallback)
         val attributions = store.activeAttributions(book.id)
         val attributionByIndex = manifest.mapNotNull { item ->
             attributions[item.phraseId]?.let { item.phraseIndex to it }

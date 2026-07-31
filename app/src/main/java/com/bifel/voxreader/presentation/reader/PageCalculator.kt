@@ -42,8 +42,8 @@ object PageCalculator {
             },
         )
         val rawEnd = (start + maxFittingLength.coerceAtLeast(1)).coerceAtMost(text.length)
-        val phraseEnd = phrases
-            .lastOrNull { it.end <= rawEnd && it.end > start + MINIMUM_SNAPPED_PAGE }
+        val phraseEnd = PhraseLookup.lastEndingAtOrBefore(phrases, rawEnd)
+            ?.takeIf { it.end > start + MINIMUM_SNAPPED_PAGE }
             ?.end
         val end = phraseEnd ?: wordBoundaryBefore(text, rawEnd, start)
         return PageLayout(start, end.coerceAtLeast(start + 1).coerceAtMost(text.length))
@@ -76,7 +76,9 @@ object PageCalculator {
             },
         )
         val rawStart = (end - maxFittingLength.coerceAtLeast(1)).coerceAtLeast(0)
-        val phraseStart = phrases.firstOrNull { it.start >= rawStart && it.start < end }?.start
+        val phraseStart = PhraseLookup.firstStartingAtOrAfter(phrases, rawStart)
+            ?.takeIf { it.start < end }
+            ?.start
         val start = phraseStart ?: wordBoundaryAfter(text, rawStart, end)
         return PageLayout(start.coerceAtMost(end - 1), end)
     }
@@ -125,7 +127,7 @@ object PageCalculator {
 
     private fun phraseStartAtOrBefore(anchor: Int, phrases: List<SpeechPhrase>): Int {
         if (anchor <= 0) return 0
-        return phrases.lastOrNull { it.start <= anchor && it.end > anchor }?.start ?: anchor
+        return PhraseLookup.containing(phrases, anchor)?.start ?: anchor
     }
 
     private fun wordBoundaryBefore(text: String, rawEnd: Int, minimum: Int): Int {
@@ -146,4 +148,3 @@ object PageCalculator {
     private const val INITIAL_PROBE = 512
     private const val MINIMUM_SNAPPED_PAGE = 80
 }
-
