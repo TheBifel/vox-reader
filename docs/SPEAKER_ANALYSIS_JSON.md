@@ -126,6 +126,10 @@ The current Android TTS proof of concept applies audible delivery changes to `AN
 using `intensity`; the remaining accepted types currently use neutral delivery. The emotion field
 is preserved in Room and when the analysis is exported again.
 
+The current labeler may include an optional per-character `character_profile` in the top-level
+`characters` registry. VoxReader accepts this reviewer-only context, but it never overrides
+phrase-level attribution or the reader's manual voice selection.
+
 ## Identity and attribution rules
 
 - Keep one `speaker_id` and voice definition per character throughout the book.

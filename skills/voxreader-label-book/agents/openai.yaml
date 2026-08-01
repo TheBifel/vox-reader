@@ -1,0 +1,4 @@
+interface:
+  display_name: "VoxReader Book Labeler"
+  short_description: "Assign narrator and character voices to EPUB text"
+  default_prompt: "Use $voxreader-label-book to analyze this EPUB or exported VoxReader JSON and produce a validated speaker-attribution JSON file."

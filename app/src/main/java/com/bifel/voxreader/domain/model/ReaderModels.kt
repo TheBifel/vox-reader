@@ -31,7 +31,16 @@ data class ReaderSettings(
     val darkTheme: Boolean = true,
     val speechControlsEnabled: Boolean = false,
     val playbackSpeed: Float = 1f,
+    val fontSizeSp: Float = 20f,
+    val lineHeightSp: Float = 31f,
+    val horizontalMarginDp: Float = 24f,
+    val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
 )
+
+enum class SpeechEngineMode {
+    PROCEDURAL,
+    LOCAL_GENERATIVE,
+}
 
 enum class VoiceGroup {
     NARRATOR,
@@ -39,6 +48,17 @@ enum class VoiceGroup {
     FEMALE,
     NEUTRAL,
 }
+
+/** Structured, optional cues from book analysis; never a claim about a person's real identity. */
+data class CharacterVoiceTraits(
+    val ageBand: CharacterAgeBand = CharacterAgeBand.UNKNOWN,
+    val genderPresentation: GenderPresentation = GenderPresentation.UNKNOWN,
+    val vocalRegister: VocalRegister = VocalRegister.UNKNOWN,
+)
+
+enum class CharacterAgeBand { CHILD, YOUNG, ADULT, MATURE, ELDER, UNKNOWN }
+enum class GenderPresentation { FEMININE, MASCULINE, ANDROGYNOUS, UNKNOWN }
+enum class VocalRegister { LOW, MEDIUM, HIGH, UNKNOWN }
 
 data class CharacterProfile(
     val id: String,
@@ -48,6 +68,7 @@ data class CharacterProfile(
     val voiceSlot: Int = 0,
     val pitch: Float = 1f,
     val speechRate: Float = 1f,
+    val traits: CharacterVoiceTraits? = null,
 )
 
 data class SpeechPhrase(
@@ -68,4 +89,13 @@ val NarratorProfile = CharacterProfile(
     voiceSlot = 0,
     pitch = 1f,
     speechRate = 0.96f,
+)
+
+val UnknownProfile = CharacterProfile(
+    id = UNKNOWN_SPEAKER_ID,
+    displayName = "Unknown",
+    voiceGroup = VoiceGroup.NEUTRAL,
+    voiceSlot = 0,
+    pitch = 1f,
+    speechRate = 1f,
 )

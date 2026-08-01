@@ -7,6 +7,10 @@ import com.bifel.voxreader.data.database.entity.CharacterEntity
 import com.bifel.voxreader.data.database.entity.PhraseAttributionEntity
 import com.bifel.voxreader.data.database.entity.PhraseManifestEntity
 import com.bifel.voxreader.domain.model.CharacterProfile
+import com.bifel.voxreader.domain.model.CharacterVoiceTraits
+import com.bifel.voxreader.domain.model.CharacterAgeBand
+import com.bifel.voxreader.domain.model.GenderPresentation
+import com.bifel.voxreader.domain.model.VocalRegister
 import com.bifel.voxreader.domain.model.EmotionType
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.VoiceGroup
@@ -225,6 +229,9 @@ class RoomPreAnalysisStore(
             voiceSlot = voiceSlot,
             pitch = pitch,
             speechRate = speechRate,
+            ageBand = traits?.ageBand?.name,
+            genderPresentation = traits?.genderPresentation?.name,
+            vocalRegister = traits?.vocalRegister?.name,
         )
 
     private fun CharacterEntity.toDomain() =
@@ -240,6 +247,13 @@ class RoomPreAnalysisStore(
             voiceSlot = voiceSlot,
             pitch = pitch,
             speechRate = speechRate,
+            traits = ageBand?.let {
+                CharacterVoiceTraits(
+                    ageBand = enumValueOrDefault(it, CharacterAgeBand.UNKNOWN),
+                    genderPresentation = enumValueOrDefault(genderPresentation.orEmpty(), GenderPresentation.UNKNOWN),
+                    vocalRegister = enumValueOrDefault(vocalRegister.orEmpty(), VocalRegister.UNKNOWN),
+                )
+            },
         )
 
     private fun String.toRunStatus(): AnalysisRunStatus =

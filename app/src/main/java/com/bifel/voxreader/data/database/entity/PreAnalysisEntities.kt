@@ -92,4 +92,7 @@ data class CharacterEntity(
     val voiceSlot: Int,
     val pitch: Float,
     val speechRate: Float,
+    val ageBand: String?,
+    val genderPresentation: String?,
+    val vocalRegister: String?,
 )

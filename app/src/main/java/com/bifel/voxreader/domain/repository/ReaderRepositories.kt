@@ -4,6 +4,7 @@ import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.LibraryState
 import com.bifel.voxreader.domain.model.ReaderSettings
+import com.bifel.voxreader.domain.model.SpeechEngineMode
 import com.bifel.voxreader.domain.model.StoredBook
 import kotlinx.coroutines.flow.Flow
 
@@ -28,4 +29,6 @@ interface SettingsRepository {
     suspend fun setDarkTheme(enabled: Boolean)
     suspend fun setSpeechControlsEnabled(enabled: Boolean)
     suspend fun setPlaybackSpeed(speed: Float)
+    suspend fun setReadingAppearance(fontSizeSp: Float, lineHeightSp: Float, horizontalMarginDp: Float)
+    suspend fun setSpeechEngineMode(mode: SpeechEngineMode)
 }

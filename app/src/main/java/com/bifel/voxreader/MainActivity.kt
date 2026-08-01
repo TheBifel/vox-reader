@@ -28,11 +28,14 @@ class MainActivity : ComponentActivity() {
     private val viewModel: ReaderViewModel by viewModels {
         val container = (application as VoxReaderApplication).container
         ReaderViewModel.Factory(
+            applicationContext = application.applicationContext,
             importBook = container.importBook,
             loadLatestBook = container.loadLatestBook,
             libraryRepository = container.libraryRepository,
             settingsRepository = container.settingsRepository,
             speechEngine = container.speechEngine,
+            generativeSpeechEngine = container.generativeSpeechEngine,
+            piperVoicePackManager = container.piperVoicePackManager,
             portableAnalysisService = container.portableAnalysisService,
         )
     }
@@ -100,7 +103,16 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         onSetPlaybackSpeed = viewModel::setPlaybackSpeed,
+                        onSetSpeechEngineMode = viewModel::setSpeechEngineMode,
+                        onDownloadLocalVoice = viewModel::downloadLocalVoice,
+                        onRemoveLocalVoice = viewModel::removeLocalVoice,
+                        onPreviewLocalVoice = viewModel::previewLocalVoice,
                         onUpdateCharacterVoice = viewModel::updateCharacterVoice,
+                        onPreviewCharacterVoice = viewModel::previewCharacterVoice,
+                        onSpeakerTapped = viewModel::speakerAt,
+                        onSetReadingAppearance = viewModel::setReadingAppearance,
+                        onHistoryBack = viewModel::goBackInHistory,
+                        onHistoryForward = viewModel::goForwardInHistory,
                         onDismissError = viewModel::dismissError,
                     )
                 }

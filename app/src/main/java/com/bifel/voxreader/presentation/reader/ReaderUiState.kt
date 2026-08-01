@@ -4,6 +4,8 @@ import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.SpeechPhrase
+import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.data.speech.PiperVoicePack
 
 enum class PlaybackState {
     DISABLED,
@@ -22,6 +24,12 @@ data class ReaderUiState(
     val darkTheme: Boolean = true,
     val speechControlsEnabled: Boolean = false,
     val playbackSpeed: Float = 1f,
+    val fontSizeSp: Float = 20f,
+    val lineHeightSp: Float = 31f,
+    val horizontalMarginDp: Float = 24f,
+    val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
+    val localGenerativeVoiceAvailable: Boolean = false,
+    val localVoicePacks: List<PiperVoicePack> = emptyList(),
     val chromeVisible: Boolean = false,
     val playbackState: PlaybackState = PlaybackState.DISABLED,
     val activePhraseIndex: Int? = null,

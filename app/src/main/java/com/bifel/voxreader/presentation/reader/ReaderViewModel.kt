@@ -1,14 +1,18 @@
 package com.bifel.voxreader.presentation.reader
 
 import android.util.Log
+import android.content.Context
+import com.bifel.voxreader.data.speech.MediaPlaybackService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NarratorProfile
+import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.StoredBook
+import com.bifel.voxreader.domain.model.SpeechEngineMode
 import com.bifel.voxreader.domain.repository.LibraryRepository
 import com.bifel.voxreader.domain.repository.SettingsRepository
 import com.bifel.voxreader.domain.speech.EmotionDelivery
@@ -18,6 +22,7 @@ import com.bifel.voxreader.domain.speech.SpeechEngine
 import com.bifel.voxreader.domain.speech.SpeechEvent
 import com.bifel.voxreader.domain.speech.SpeechQueueMode
 import com.bifel.voxreader.domain.speech.SpeechRequest
+import com.bifel.voxreader.data.speech.PiperVoicePackManager
 import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.domain.text.SentenceSegmenter
 import com.bifel.voxreader.domain.usecase.ImportBookUseCase
@@ -34,11 +39,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class ReaderViewModel(
+    private val applicationContext: Context,
     private val importBook: ImportBookUseCase,
     private val loadLatestBook: LoadLatestBookUseCase,
     private val libraryRepository: LibraryRepository,
     private val settingsRepository: SettingsRepository,
     private val speechEngine: SpeechEngine,
+    private val generativeSpeechEngine: SpeechEngine,
+    private val piperVoicePackManager: PiperVoicePackManager,
     private val portableAnalysisService: PortableAnalysisService,
 ) : ViewModel() {
 
@@ -50,7 +58,10 @@ class ReaderViewModel(
     private var currentUtteranceId: String? = null
     private var speechQueueJob: Job? = null
     private val speechBuffer = PhrasePlaybackBuffer(SPEECH_LOOK_AHEAD_PHRASES)
+    private val recentPhraseCache = ArrayDeque<Int>()
     private var playbackSession = 0L
+    private val backHistory = ArrayDeque<Int>()
+    private val forwardHistory = ArrayDeque<Int>()
 
     init {
         viewModelScope.launch {
@@ -60,6 +71,10 @@ class ReaderViewModel(
                         darkTheme = settings.darkTheme,
                         speechControlsEnabled = settings.speechControlsEnabled,
                         playbackSpeed = settings.playbackSpeed,
+                        fontSizeSp = settings.fontSizeSp,
+                        lineHeightSp = settings.lineHeightSp,
+                        horizontalMarginDp = settings.horizontalMarginDp,
+                        speechEngineMode = settings.speechEngineMode,
                         playbackState = when {
                             !settings.speechControlsEnabled -> PlaybackState.DISABLED
                             it.playbackState == PlaybackState.DISABLED -> PlaybackState.PAUSED
@@ -71,6 +86,29 @@ class ReaderViewModel(
         }
         viewModelScope.launch {
             speechEngine.events.collect(::handleSpeechEvent)
+        }
+        viewModelScope.launch {
+            generativeSpeechEngine.events.collect(::handleSpeechEvent)
+        }
+        viewModelScope.launch {
+            piperVoicePackManager.packs.collect { packs ->
+                mutableUiState.update {
+                    it.copy(
+                        localVoicePacks = packs,
+                        localGenerativeVoiceAvailable = packs.any { pack -> pack.installed },
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            MediaPlaybackService.commands.collect { command ->
+                when (command) {
+                    MediaPlaybackService.Command.Play -> playOrPause()
+                    MediaPlaybackService.Command.Pause -> pause()
+                    MediaPlaybackService.Command.Next -> nextPhrase()
+                    MediaPlaybackService.Command.Previous -> previousPhrase()
+                }
+            }
         }
     }
 
@@ -123,6 +161,7 @@ class ReaderViewModel(
 
     fun disableSpeechControls() {
         stopPlayback(clearSelection = false)
+        MediaPlaybackService.stop(applicationContext)
         viewModelScope.launch {
             settingsRepository.setSpeechControlsEnabled(false)
         }
@@ -142,6 +181,53 @@ class ReaderViewModel(
         restartIndex?.let(::preparePhraseAndPlay)
     }
 
+    fun setReadingAppearance(fontSizeSp: Float, lineHeightSp: Float, horizontalMarginDp: Float) {
+        viewModelScope.launch {
+            settingsRepository.setReadingAppearance(fontSizeSp, lineHeightSp, horizontalMarginDp)
+        }
+    }
+
+    fun setSpeechEngineMode(mode: SpeechEngineMode) {
+        pause()
+        mutableUiState.update { it.copy(speechEngineMode = mode) }
+        viewModelScope.launch { settingsRepository.setSpeechEngineMode(mode) }
+    }
+
+    fun downloadLocalVoice(id: String) {
+        viewModelScope.launch { piperVoicePackManager.download(id) }
+    }
+
+    fun removeLocalVoice(id: String) {
+        resetSpeechPipeline()
+        viewModelScope.launch { piperVoicePackManager.remove(id) }
+    }
+
+    fun previewLocalVoice(id: String) {
+        val installed = piperVoicePackManager.installedPacks()
+        val pack = installed.firstOrNull { it.id == id } ?: return
+        val voiceSlot = installed.filter { it.voiceGroup == pack.voiceGroup }.indexOf(pack)
+        resetSpeechPipeline()
+        mutableUiState.update {
+            it.copy(playbackState = if (it.speechControlsEnabled) PlaybackState.PAUSED else PlaybackState.DISABLED)
+        }
+        viewModelScope.launch {
+            runCatching {
+                generativeSpeechEngine.awaitReady()
+                generativeSpeechEngine.enqueue(
+                    SpeechRequest(
+                        utteranceId = "model-preview:${pack.id}:${System.nanoTime()}",
+                        text = "Hello, this is how ${pack.displayName} sounds.",
+                        voiceSlot = voiceSlot,
+                        voiceGroup = pack.voiceGroup,
+                        pitch = 1f,
+                        speechRate = 1f,
+                    ),
+                    SpeechQueueMode.FLUSH,
+                )
+            }.onFailure(::showError)
+        }
+    }
+
     fun updateCharacterVoice(profile: CharacterProfile) {
         val state = mutableUiState.value
         val book = state.book ?: return
@@ -158,6 +244,30 @@ class ReaderViewModel(
         viewModelScope.launch {
             libraryRepository.updateVoiceOverride(book.id, profile)
             portableAnalysisService.updateVoiceProfile(book.id, profile)
+        }
+    }
+
+    fun previewCharacterVoice(profile: CharacterProfile) {
+        resetSpeechPipeline()
+        mutableUiState.update {
+            it.copy(playbackState = if (it.speechControlsEnabled) PlaybackState.PAUSED else PlaybackState.DISABLED)
+        }
+        viewModelScope.launch {
+            runCatching {
+                val engine = activeSpeechEngine()
+                engine.awaitReady()
+                engine.enqueue(
+                    SpeechRequest(
+                        utteranceId = "voice-preview:${profile.id}:${System.nanoTime()}",
+                        text = "Hello. This is how ${profile.displayName}'s voice sounds.",
+                        voiceSlot = profile.voiceSlot,
+                        voiceGroup = profile.voiceGroup,
+                        pitch = profile.pitch,
+                        speechRate = profile.speechRate,
+                    ),
+                    SpeechQueueMode.FLUSH,
+                )
+            }.onFailure(::showError)
         }
     }
 
@@ -188,6 +298,11 @@ class ReaderViewModel(
         val book = mutableUiState.value.book ?: return
         val safeStart = start.coerceIn(0, book.text.length)
         val safeEnd = end.coerceIn(safeStart, book.text.length)
+        if (userInitiated && safeStart != mutableUiState.value.pageStart) {
+            backHistory.addLast(mutableUiState.value.pageStart)
+            if (backHistory.size > MAX_HISTORY_ENTRIES) backHistory.removeFirst()
+            forwardHistory.clear()
+        }
         if (userInitiated) {
             if (mutableUiState.value.playbackState == PlaybackState.PLAYING ||
                 mutableUiState.value.playbackState == PlaybackState.PREPARING
@@ -207,6 +322,28 @@ class ReaderViewModel(
         viewModelScope.launch {
             libraryRepository.updateReadingPosition(book.id, safeStart, safeEnd)
         }
+    }
+
+    fun goBackInHistory() = navigateHistory(backHistory, forwardHistory)
+
+    fun goForwardInHistory() = navigateHistory(forwardHistory, backHistory)
+
+    fun speakerAt(offset: Int): String? {
+        val state = mutableUiState.value
+        val phrase = PhraseLookup.containing(state.phrases, offset) ?: return null
+        return state.characters.firstOrNull { it.id == phrase.speakerId }?.displayName
+            ?: when (phrase.speakerId) {
+                NarratorProfile.id -> NarratorProfile.displayName
+                UNKNOWN_SPEAKER_ID -> "Unknown"
+                else -> null
+            }
+    }
+
+    private fun navigateHistory(from: ArrayDeque<Int>, to: ArrayDeque<Int>) {
+        val target = from.removeLastOrNull() ?: return
+        val current = mutableUiState.value.pageStart
+        to.addLast(current)
+        onPageChanged(target, target, false)
     }
 
     fun dismissError() {
@@ -344,6 +481,13 @@ class ReaderViewModel(
         val state = mutableUiState.value
         state.book ?: return
         if (state.phrases.isEmpty()) return
+        if (
+            state.speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE &&
+            piperVoicePackManager.installedPacks().isEmpty()
+        ) {
+            showError(IllegalStateException("Local AI voice is selected, but no compatible voice model is installed yet."))
+            return
+        }
 
         val requestedIndex = state.activePhraseIndex
             ?.coerceIn(state.phrases.indices)
@@ -364,6 +508,7 @@ class ReaderViewModel(
                 },
             )
         }
+        mutableUiState.value.book?.let { MediaPlaybackService.update(applicationContext, it.title, false) }
     }
 
     private fun movePhrase(delta: Int) {
@@ -419,9 +564,10 @@ class ReaderViewModel(
                 playbackState = PlaybackState.PREPARING,
             )
         }
+        state.book?.let { MediaPlaybackService.update(applicationContext, it.title, true) }
         speechQueueJob = viewModelScope.launch {
             runCatching {
-                speechEngine.awaitReady()
+                activeSpeechEngine().awaitReady()
                 fillSpeechBuffer(
                     session = session,
                     initialIndex = index,
@@ -498,7 +644,7 @@ class ReaderViewModel(
                 "pitch=$pitch; rate=$speechRate; pause=${delivery.pauseAfterMillis}ms; " +
                 "mode=$queueMode; buffered=${speechBuffer.size}",
         )
-        speechEngine.enqueue(
+        activeSpeechEngine().enqueue(
             SpeechRequest(
                 utteranceId = utteranceId,
                 text = SpeechText.withoutSpokenQuotes(phrase.text),
@@ -542,6 +688,8 @@ class ReaderViewModel(
 
             is SpeechEvent.Completed -> {
                 val completed = speechBuffer.remove(event.utteranceId) ?: return
+                recentPhraseCache.addLast(completed.phraseIndex)
+                while (recentPhraseCache.size > SPEECH_BEHIND_PHRASES) recentPhraseCache.removeFirst()
                 if (currentUtteranceId == event.utteranceId) {
                     currentUtteranceId = null
                 }
@@ -646,6 +794,7 @@ class ReaderViewModel(
         currentUtteranceId = null
         speechBuffer.clear()
         speechEngine.stop()
+        generativeSpeechEngine.stop()
     }
 
     private fun showError(error: Throwable) {
@@ -677,6 +826,11 @@ class ReaderViewModel(
         return null
     }
 
+    private fun activeSpeechEngine(): SpeechEngine = when (mutableUiState.value.speechEngineMode) {
+        SpeechEngineMode.PROCEDURAL -> speechEngine
+        SpeechEngineMode.LOCAL_GENERATIVE -> generativeSpeechEngine
+    }
+
     private fun applyVoiceOverrides(
         profiles: List<CharacterProfile>,
         overrides: List<CharacterProfile>,
@@ -700,25 +854,33 @@ class ReaderViewModel(
 
     private companion object {
         const val TAG = "VoxReader"
-        const val SPEECH_LOOK_AHEAD_PHRASES = 3
+        const val SPEECH_LOOK_AHEAD_PHRASES = 5
+        const val SPEECH_BEHIND_PHRASES = 3
+        const val MAX_HISTORY_ENTRIES = 100
     }
 
     class Factory(
+        private val applicationContext: Context,
         private val importBook: ImportBookUseCase,
         private val loadLatestBook: LoadLatestBookUseCase,
         private val libraryRepository: LibraryRepository,
         private val settingsRepository: SettingsRepository,
         private val speechEngine: SpeechEngine,
+        private val generativeSpeechEngine: SpeechEngine,
+        private val piperVoicePackManager: PiperVoicePackManager,
         private val portableAnalysisService: PortableAnalysisService,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
             ReaderViewModel(
+                applicationContext = applicationContext,
                 importBook = importBook,
                 loadLatestBook = loadLatestBook,
                 libraryRepository = libraryRepository,
                 settingsRepository = settingsRepository,
                 speechEngine = speechEngine,
+                generativeSpeechEngine = generativeSpeechEngine,
+                piperVoicePackManager = piperVoicePackManager,
                 portableAnalysisService = portableAnalysisService,
             ) as T
     }

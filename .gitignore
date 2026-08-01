@@ -12,3 +12,9 @@
 /local-diagnostics/
 __pycache__/
 *.pyc
+/*.png
+/test-data/
+/app/src/main/assets/vits-piper-en_US-amy-low/en_US-amy-low.onnx
+/app/src/main/assets/vits-piper-en_US-amy-low/en_US-amy-low.onnx.json
+/app/src/main/assets/vits-piper-en_US-amy-low/MODEL_CARD
+/app/src/main/assets/vits-piper-en_US-ryan-low/

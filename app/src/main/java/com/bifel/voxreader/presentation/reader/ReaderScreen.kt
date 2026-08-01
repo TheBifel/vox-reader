@@ -44,6 +44,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
@@ -66,6 +67,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import android.widget.Toast
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -80,8 +85,13 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.NARRATOR_ID
+import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
+import com.bifel.voxreader.domain.model.UnknownProfile
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.VoiceGroup
+import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.data.speech.PiperVoicePack
+import com.bifel.voxreader.data.speech.VoicePackDownloadState
 import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.presentation.theme.ReaderHighlight
 import kotlinx.coroutines.launch
@@ -103,12 +113,24 @@ fun ReaderScreen(
     onExportAnalysis: () -> Unit,
     onImportAnalysis: () -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
+    onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
+    onDownloadLocalVoice: (String) -> Unit,
+    onRemoveLocalVoice: (String) -> Unit,
+    onPreviewLocalVoice: (String) -> Unit,
     onUpdateCharacterVoice: (CharacterProfile) -> Unit,
+    onPreviewCharacterVoice: (CharacterProfile) -> Unit,
+    onSpeakerTapped: (Int) -> String?,
+    onSetReadingAppearance: (Float, Float, Float) -> Unit,
+    onHistoryBack: () -> Unit,
+    onHistoryForward: () -> Unit,
     onDismissError: () -> Unit,
 ) {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var editingCharacterId by remember { mutableStateOf<String?>(null) }
+    var showAppearance by remember { mutableStateOf(false) }
+    var showCharacters by remember { mutableStateOf(false) }
+    val context = LocalContext.current
     val speakerColorSlots = remember(state.characters) {
         state.characters
             .asSequence()
@@ -148,7 +170,20 @@ fun ReaderScreen(
                     onImportAnalysis()
                     scope.launch { drawerState.close() }
                 },
+                onSetSpeechEngineMode = onSetSpeechEngineMode,
+                onDownloadLocalVoice = onDownloadLocalVoice,
+                onRemoveLocalVoice = onRemoveLocalVoice,
+                onPreviewLocalVoice = onPreviewLocalVoice,
                 onEditCharacter = { editingCharacterId = it.id },
+                onShowCharacters = {
+                    showCharacters = true
+                    scope.launch { drawerState.close() }
+                },
+                onShowAppearance = { showAppearance = true },
+                onGoToChapter = { offset ->
+                    onPageChanged(offset, offset, true)
+                    scope.launch { drawerState.close() }
+                },
             )
         },
     ) {
@@ -168,6 +203,11 @@ fun ReaderScreen(
                 onNextPhrase = onNextPhrase,
                 onSetPlaybackSpeed = onSetPlaybackSpeed,
                 onPageChanged = onPageChanged,
+                onSpeakerTapped = { offset ->
+                    onSpeakerTapped(offset)?.let { Toast.makeText(context, "$it’s voice", Toast.LENGTH_SHORT).show() }
+                },
+                onHistoryBack = onHistoryBack,
+                onHistoryForward = onHistoryForward,
             )
         }
     }
@@ -183,6 +223,18 @@ fun ReaderScreen(
             title = { Text("VoxReader") },
             text = { Text(message) },
         )
+        }
+
+    if (showCharacters) {
+        CharacterListDialog(
+            state = state,
+            speakerColorSlots = speakerColorSlots,
+            onDismiss = { showCharacters = false },
+            onEditCharacter = {
+                showCharacters = false
+                editingCharacterId = it.id
+            },
+        )
     }
 
     editingCharacterId
@@ -190,13 +242,29 @@ fun ReaderScreen(
         ?.let { profile ->
             CharacterVoiceDialog(
                 profile = profile,
+                speechEngineMode = state.speechEngineMode,
+                localVoicePacks = state.localVoicePacks,
                 onDismiss = { editingCharacterId = null },
+                onPreview = onPreviewCharacterVoice,
                 onSave = {
                     onUpdateCharacterVoice(it)
                     editingCharacterId = null
                 },
             )
         }
+
+    if (showAppearance) {
+        AppearanceDialog(
+            fontSize = state.fontSizeSp,
+            lineHeight = state.lineHeightSp,
+            margin = state.horizontalMarginDp,
+            onDismiss = { showAppearance = false },
+            onSave = { font, line, margin ->
+                onSetReadingAppearance(font, line, margin)
+                showAppearance = false
+            },
+        )
+    }
 }
 
 @Composable
@@ -208,8 +276,18 @@ private fun ReaderDrawer(
     onDisableSpeech: () -> Unit,
     onExportAnalysis: () -> Unit,
     onImportAnalysis: () -> Unit,
+    onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
+    onDownloadLocalVoice: (String) -> Unit,
+    onRemoveLocalVoice: (String) -> Unit,
+    onPreviewLocalVoice: (String) -> Unit,
     onEditCharacter: (CharacterProfile) -> Unit,
+    onShowCharacters: () -> Unit,
+    onShowAppearance: () -> Unit,
+    onGoToChapter: (Int) -> Unit,
 ) {
+    var showEngineDialog by remember { mutableStateOf(false) }
+    var showVoicePacks by remember { mutableStateOf(false) }
+    var chaptersExpanded by remember { mutableStateOf(false) }
     ModalDrawerSheet {
         Column(
             modifier = Modifier
@@ -233,6 +311,42 @@ private fun ReaderDrawer(
                 )
             }
             HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            state.book?.let { book ->
+                val currentChapter = book.chapterStarts.indexOfLast { it <= state.pageStart }.coerceAtLeast(0)
+                ListItem(
+                    headlineContent = { Text("Table of contents") },
+                    supportingContent = { Text("Chapter ${currentChapter + 1} of ${book.chapterStarts.size}") },
+                    trailingContent = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                            contentDescription = null,
+                        )
+                    },
+                    modifier = Modifier.clickable { chaptersExpanded = !chaptersExpanded },
+                )
+                AnimatedVisibility(visible = chaptersExpanded) {
+                    Column {
+                        book.chapterStarts.forEachIndexed { index, start ->
+                            ListItem(
+                                headlineContent = { Text(chapterLabel(book, index, start)) },
+                                supportingContent = {
+                                    if (index == currentChapter) Text("Current chapter", color = MaterialTheme.colorScheme.primary)
+                                },
+                                modifier = Modifier.clickable {
+                                    chaptersExpanded = false
+                                    onGoToChapter(start)
+                                },
+                            )
+                        }
+                    }
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+            }
+            ListItem(
+                headlineContent = { Text("Reading appearance") },
+                supportingContent = { Text("Font size, line spacing, and page margins") },
+                modifier = Modifier.clickable(onClick = onShowAppearance),
+            )
             ListItem(
                 headlineContent = { Text("Dark reading theme") },
                 supportingContent = { Text("Black background with warm white text") },
@@ -270,6 +384,28 @@ private fun ReaderDrawer(
                 modifier = Modifier.clickable {
                     if (state.speechControlsEnabled) onDisableSpeech() else onEnableSpeech()
                 },
+            )
+            ListItem(
+                headlineContent = {
+                    Text(
+                        if (state.speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE) {
+                            "Voice engine: Local AI"
+                        } else {
+                            "Voice engine: Procedural"
+                        },
+                    )
+                },
+                supportingContent = {
+                    Text(
+                        if (state.speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE) {
+                            "Choose downloaded AI voices for each character."
+                        } else {
+                            "Fast Android offline voices with pitch and rate controls."
+                        },
+                    )
+                },
+                leadingContent = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) },
+                modifier = Modifier.clickable { showEngineDialog = true },
             )
             Spacer(Modifier.height(8.dp))
             ListItem(
@@ -322,10 +458,11 @@ private fun ReaderDrawer(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 10.dp),
                 )
-                VoiceProfileList(
-                    state = state,
-                    speakerColorSlots = speakerColorSlots,
-                    onEditCharacter = onEditCharacter,
+                ListItem(
+                    headlineContent = { Text("Characters and voices") },
+                    supportingContent = { Text("${visibleVoiceProfiles(state).size} available profiles") },
+                    leadingContent = { Icon(Icons.Default.RecordVoiceOver, contentDescription = null) },
+                    modifier = Modifier.clickable(onClick = onShowCharacters),
                 )
             }
             state.analysisMessage?.let { message ->
@@ -339,14 +476,32 @@ private fun ReaderDrawer(
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    VoiceEngineDialogs(
+        showEngineDialog = showEngineDialog,
+        showVoicePacks = showVoicePacks,
+        speechEngineMode = state.speechEngineMode,
+        localGenerativeVoiceAvailable = state.localGenerativeVoiceAvailable,
+        localVoicePacks = state.localVoicePacks,
+        onShowEngineDialog = { showEngineDialog = it },
+        onShowVoicePacks = { showVoicePacks = it },
+        onSetSpeechEngineMode = onSetSpeechEngineMode,
+        onDownloadLocalVoice = onDownloadLocalVoice,
+        onRemoveLocalVoice = onRemoveLocalVoice,
+        onPreviewLocalVoice = onPreviewLocalVoice,
+    )
+}
+
+private fun chapterLabel(book: BookDocument, index: Int, start: Int): String {
+    val preview = book.text.substring(start, minOf(book.text.length, start + 140))
+        .lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+    return preview.takeIf { it.length in 2..80 } ?: "Chapter ${index + 1}"
 }
 
 @Composable
-private fun VoiceProfileList(
+private fun visibleVoiceProfiles(
     state: ReaderUiState,
-    speakerColorSlots: Map<String, Int>,
-    onEditCharacter: (CharacterProfile) -> Unit,
-) {
+): List<CharacterProfile> {
     val cachedSpeakerIds = state.phrases
         .asSequence()
         .filter { SpeechText.isSpeakable(it.text) }
@@ -359,21 +514,48 @@ private fun VoiceProfileList(
             it.id == NARRATOR_ID ||
                 it.id in cachedSpeakerIds
         }
-        .sortedWith(compareBy({ it.id != NARRATOR_ID }, { it.displayName }))
-    if (speakers.isEmpty()) return
+        .let { profiles ->
+            if (UNKNOWN_SPEAKER_ID in cachedSpeakerIds && profiles.none { it.id == UNKNOWN_SPEAKER_ID }) {
+                profiles + UnknownProfile
+            } else {
+                profiles
+            }
+        }
+        .sortedWith(
+            compareBy<CharacterProfile>(
+                { when (it.id) { NARRATOR_ID -> 0; UNKNOWN_SPEAKER_ID -> 2; else -> 1 } },
+                { it.displayName },
+            ),
+        )
+    return speakers
+}
 
-    Text(
-        text = "Voices and speaker colors",
-        style = MaterialTheme.typography.labelMedium,
-        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-    )
+@Composable
+private fun CharacterListDialog(
+    state: ReaderUiState,
+    speakerColorSlots: Map<String, Int>,
+    onDismiss: () -> Unit,
+    onEditCharacter: (CharacterProfile) -> Unit,
+) {
+    val speakers = visibleVoiceProfiles(state)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Characters and voices") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Tap a character to choose and tune its voice.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(8.dp))
     speakers.forEach { character ->
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable { onEditCharacter(character) }
-                .padding(horizontal = 24.dp, vertical = 9.dp),
+                .padding(vertical = 9.dp),
         ) {
             Box(
                 Modifier
@@ -409,6 +591,10 @@ private fun VoiceProfileList(
             )
         }
     }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 @Composable
@@ -422,6 +608,9 @@ private fun ReaderContent(
     onNextPhrase: () -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
+    onSpeakerTapped: (Int) -> Unit,
+    onHistoryBack: () -> Unit,
+    onHistoryForward: () -> Unit,
 ) {
     var displayedPage by remember(state.book?.id) {
         mutableStateOf(PageLayout(state.pageStart, state.pageEnd))
@@ -446,7 +635,11 @@ private fun ReaderContent(
                 cachedSpeakerPhraseIndices = state.cachedSpeakerPhraseIndices,
                 speakerColorSlots = speakerColorSlots,
                 darkTheme = state.darkTheme,
+                fontSizeSp = state.fontSizeSp,
+                lineHeightSp = state.lineHeightSp,
+                horizontalMarginDp = state.horizontalMarginDp,
                 onToggleChrome = onToggleChrome,
+                onSpeakerTapped = onSpeakerTapped,
                 onPageChanged = onPageChanged,
                 onPageDisplayed = { displayedPage = it },
                 onPageSizeEstimated = { estimatedCharactersPerPage = it },
@@ -488,6 +681,8 @@ private fun ReaderContent(
             ReaderHeader(
                 title = state.book?.title.orEmpty(),
                 onOpenDrawer = onOpenDrawer,
+                onHistoryBack = onHistoryBack,
+                onHistoryForward = onHistoryForward,
             )
         }
     }
@@ -503,7 +698,11 @@ private fun PaginatedBookPage(
     cachedSpeakerPhraseIndices: Set<Int>,
     speakerColorSlots: Map<String, Int>,
     darkTheme: Boolean,
+    fontSizeSp: Float,
+    lineHeightSp: Float,
+    horizontalMarginDp: Float,
     onToggleChrome: () -> Unit,
+    onSpeakerTapped: (Int) -> Unit,
     onPageChanged: (Int, Int, Boolean) -> Unit,
     onPageDisplayed: (PageLayout) -> Unit,
     onPageSizeEstimated: (Int) -> Unit,
@@ -514,15 +713,15 @@ private fun PaginatedBookPage(
     val pageStyle = MaterialTheme.typography.bodyLarge.copy(
         color = MaterialTheme.colorScheme.onBackground,
         fontFamily = FontFamily.Serif,
-        fontSize = 20.sp,
-        lineHeight = 31.sp,
+        fontSize = fontSizeSp.sp,
+        lineHeight = lineHeightSp.sp,
         letterSpacing = 0.15.sp,
     )
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 27.dp, vertical = 22.dp),
+            .padding(horizontal = horizontalMarginDp.dp, vertical = 22.dp),
     ) {
         val widthPx = with(density) { maxWidth.toPx().roundToInt() }
         val heightPx = with(density) { maxHeight.toPx().roundToInt() }
@@ -604,6 +803,7 @@ private fun PaginatedBookPage(
         }
 
         if (page.end > page.start && page.end <= book.text.length) {
+            var textLayout by remember(page.start, page.end) { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
             Text(
                 text = highlightedPage(
                     text = book.text,
@@ -617,7 +817,18 @@ private fun PaginatedBookPage(
                 ),
                 style = pageStyle,
                 overflow = TextOverflow.Clip,
-                modifier = Modifier.fillMaxSize(),
+                onTextLayout = { textLayout = it },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(page.start, page.end, phrases) {
+                        detectTapGestures(
+                            onTap = { onToggleChrome() },
+                            onLongPress = { position ->
+                                textLayout?.getOffsetForPosition(position)
+                                    ?.let { onSpeakerTapped(page.start + it) }
+                            },
+                        )
+                    },
             )
         }
 
@@ -643,11 +854,7 @@ private fun PaginatedBookPage(
                 },
                 modifier = Modifier.weight(1f),
             )
-            InvisibleTapZone(
-                label = "Show or hide reader menu",
-                onClick = onToggleChrome,
-                modifier = Modifier.weight(1f),
-            )
+            Box(Modifier.weight(1f))
             InvisibleTapZone(
                 label = "Next page",
                 onClick = {
@@ -906,6 +1113,8 @@ private fun formatCoverage(coverage: Float): String {
 private fun ReaderHeader(
     title: String,
     onOpenDrawer: () -> Unit,
+    onHistoryBack: () -> Unit,
+    onHistoryForward: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -928,7 +1137,42 @@ private fun ReaderHeader(
                 .weight(1f)
                 .padding(horizontal = 8.dp),
         )
+        IconButton(onClick = onHistoryBack) {
+            Icon(Icons.Default.SkipPrevious, contentDescription = "Back in reading history")
+        }
+        IconButton(onClick = onHistoryForward) {
+            Icon(Icons.Default.SkipNext, contentDescription = "Forward in reading history")
+        }
     }
+}
+
+@Composable
+private fun AppearanceDialog(
+    fontSize: Float,
+    lineHeight: Float,
+    margin: Float,
+    onDismiss: () -> Unit,
+    onSave: (Float, Float, Float) -> Unit,
+) {
+    var font by remember(fontSize) { mutableStateOf(fontSize) }
+    var line by remember(lineHeight) { mutableStateOf(lineHeight) }
+    var pageMargin by remember(margin) { mutableStateOf(margin) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reading appearance") },
+        text = {
+            Column {
+                VoiceSliderLabel("Font size", "${font.roundToInt()} sp")
+                Slider(value = font, onValueChange = { font = it }, valueRange = 14f..32f, steps = 17)
+                VoiceSliderLabel("Line spacing", "${line.roundToInt()} sp")
+                Slider(value = line, onValueChange = { line = it }, valueRange = 18f..48f, steps = 29)
+                VoiceSliderLabel("Page margins", "${pageMargin.roundToInt()} dp")
+                Slider(value = pageMargin, onValueChange = { pageMargin = it }, valueRange = 12f..56f, steps = 10)
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(font, line, pageMargin) }) { Text("Apply") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -1057,14 +1301,171 @@ private fun SpeechControls(
             },
         )
     }
+
 }
+
+@Composable
+private fun EngineChoice(
+    title: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Column(Modifier.padding(start = 8.dp)) {
+            Text(title)
+            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun VoiceEngineDialogs(
+    showEngineDialog: Boolean,
+    showVoicePacks: Boolean,
+    speechEngineMode: SpeechEngineMode,
+    localGenerativeVoiceAvailable: Boolean,
+    localVoicePacks: List<PiperVoicePack>,
+    onShowEngineDialog: (Boolean) -> Unit,
+    onShowVoicePacks: (Boolean) -> Unit,
+    onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
+    onDownloadLocalVoice: (String) -> Unit,
+    onRemoveLocalVoice: (String) -> Unit,
+    onPreviewLocalVoice: (String) -> Unit,
+) {
+    var voicePendingRemoval by remember { mutableStateOf<PiperVoicePack?>(null) }
+
+    if (showEngineDialog) {
+        AlertDialog(
+            onDismissRequest = { onShowEngineDialog(false) },
+            title = { Text("Voice engine") },
+            text = {
+                Column {
+                    EngineChoice(
+                        title = "Procedural voice",
+                        description = "Fast Android offline voice with pitch and rate controls.",
+                        selected = speechEngineMode == SpeechEngineMode.PROCEDURAL,
+                    ) {
+                        onSetSpeechEngineMode(SpeechEngineMode.PROCEDURAL)
+                        onShowEngineDialog(false)
+                    }
+                    EngineChoice(
+                        title = "Local AI voice",
+                        description = if (localGenerativeVoiceAvailable) {
+                            "Uses downloaded AI voice packs and buffers speech on this device."
+                        } else {
+                            "Download at least one compatible AI voice pack first."
+                        },
+                        selected = speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE,
+                    ) {
+                        onSetSpeechEngineMode(SpeechEngineMode.LOCAL_GENERATIVE)
+                        onShowEngineDialog(false)
+                    }
+                    TextButton(onClick = { onShowVoicePacks(true) }) { Text("Add or manage AI voices") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { onShowEngineDialog(false) }) { Text("Done") } },
+        )
+    }
+
+    if (showVoicePacks) {
+        AlertDialog(
+            onDismissRequest = { onShowVoicePacks(false) },
+            title = { Text("Local AI voices") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text(
+                        "Use Play to preview a downloaded voice. Downloaded voices can be assigned to characters.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    localVoicePacks.forEach { pack ->
+                        ListItem(
+                            headlineContent = { Text(pack.displayName) },
+                            supportingContent = {
+                                Column {
+                                    Text(pack.description)
+                                    Text(
+                                        "${pack.voiceGroup.name.lowercase().replaceFirstChar(Char::uppercase)} - " +
+                                            formatVoicePackSize(pack.installedSizeBytes) + " - " +
+                                            when (pack.downloadState) {
+                                                VoicePackDownloadState.INSTALLED -> "Installed"
+                                                VoicePackDownloadState.DOWNLOADING -> "Downloading..."
+                                                VoicePackDownloadState.FAILED -> pack.error ?: "Download failed"
+                                                VoicePackDownloadState.NOT_INSTALLED -> "Not downloaded"
+                                            },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    if (pack.downloadState == VoicePackDownloadState.DOWNLOADING) {
+                                        LinearProgressIndicator(
+                                            progress = { pack.downloadProgress ?: 0f },
+                                            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                                        )
+                                    }
+                                }
+                            },
+                            trailingContent = {
+                                Column(horizontalAlignment = Alignment.End) {
+                                    if (pack.installed) {
+                                        TextButton(onClick = { onPreviewLocalVoice(pack.id) }) { Text("Play") }
+                                        TextButton(onClick = { voicePendingRemoval = pack }) { Text("Remove") }
+                                    } else {
+                                        TextButton(
+                                            enabled = pack.downloadState != VoicePackDownloadState.DOWNLOADING,
+                                            onClick = { onDownloadLocalVoice(pack.id) },
+                                        ) { Text("Download") }
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { onShowVoicePacks(false) }) { Text("Done") } },
+        )
+    }
+
+    voicePendingRemoval?.let { pack ->
+        AlertDialog(
+            onDismissRequest = { voicePendingRemoval = null },
+            title = { Text("Remove ${pack.displayName}?") },
+            text = { Text("This deletes the downloaded voice model from this device. You can download it again later.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRemoveLocalVoice(pack.id)
+                    voicePendingRemoval = null
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { voicePendingRemoval = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+private fun formatVoicePackSize(sizeBytes: Long?): String =
+    sizeBytes?.let { String.format(Locale.ROOT, "%.1f MB", it / (1024f * 1024f)) }
+        ?: "Size shown after download"
 
 @Composable
 private fun CharacterVoiceDialog(
     profile: CharacterProfile,
+    speechEngineMode: SpeechEngineMode,
+    localVoicePacks: List<PiperVoicePack>,
     onDismiss: () -> Unit,
+    onPreview: (CharacterProfile) -> Unit,
     onSave: (CharacterProfile) -> Unit,
 ) {
+    val installedAiVoices = localVoicePacks.filter { it.installed }
+    val initialAiVoice = installedAiVoices
+        .filter { it.voiceGroup == profile.voiceGroup }
+        .getOrNull(Math.floorMod(profile.voiceSlot, installedAiVoices.count { it.voiceGroup == profile.voiceGroup }.coerceAtLeast(1)))
+        ?: installedAiVoices.firstOrNull()
+    var selectedAiVoiceId by remember(profile.id, localVoicePacks) {
+        mutableStateOf(initialAiVoice?.id)
+    }
     var voiceGroup by remember(profile.id, profile.voiceGroup) {
         mutableStateOf(profile.voiceGroup)
     }
@@ -1077,6 +1478,18 @@ private fun CharacterVoiceDialog(
     var speechRate by remember(profile.id, profile.speechRate) {
         mutableStateOf(profile.speechRate)
     }
+    fun draftProfile(): CharacterProfile {
+        val selectedAiVoice = installedAiVoices.firstOrNull { it.id == selectedAiVoiceId }
+        val aiVoiceSlot = selectedAiVoice?.let { selected ->
+            installedAiVoices.filter { it.voiceGroup == selected.voiceGroup }.indexOf(selected)
+        } ?: voiceSlot.roundToInt()
+        return profile.copy(
+            voiceGroup = selectedAiVoice?.voiceGroup ?: voiceGroup,
+            voiceSlot = aiVoiceSlot,
+            pitch = pitch,
+            speechRate = speechRate,
+        )
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1087,36 +1500,73 @@ private fun CharacterVoiceDialog(
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState()),
             ) {
-                Text("Voice family", style = MaterialTheme.typography.labelLarge)
-                VoiceGroup.entries.forEach { option ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { voiceGroup = option },
-                    ) {
-                        RadioButton(
-                            selected = voiceGroup == option,
-                            onClick = { voiceGroup = option },
+                if (speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE) {
+                    Text("AI voice pack", style = MaterialTheme.typography.labelLarge)
+                    if (installedAiVoices.isEmpty()) {
+                        Text(
+                            "No AI voices are installed. Add them from Voice engine in the reader menu.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        Text(option.name.lowercase().replaceFirstChar(Char::uppercase))
+                    } else {
+                        installedAiVoices.forEach { pack ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { selectedAiVoiceId = pack.id },
+                            ) {
+                                RadioButton(
+                                    selected = selectedAiVoiceId == pack.id,
+                                    onClick = { selectedAiVoiceId = pack.id },
+                                )
+                                Column {
+                                    Text(pack.displayName)
+                                    Text(
+                                        pack.voiceGroup.name.lowercase().replaceFirstChar(Char::uppercase),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
+                    Text(
+                        "AI voice pitch is model-defined. Speaking rate is applied during generation.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text("Voice family", style = MaterialTheme.typography.labelLarge)
+                    VoiceGroup.entries.forEach { option ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { voiceGroup = option },
+                        ) {
+                            RadioButton(
+                                selected = voiceGroup == option,
+                                onClick = { voiceGroup = option },
+                            )
+                            Text(option.name.lowercase().replaceFirstChar(Char::uppercase))
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    VoiceSliderLabel("Voice variation", voiceSlot.roundToInt().toString())
+                    Slider(
+                        value = voiceSlot,
+                        onValueChange = { voiceSlot = it.roundToInt().toFloat() },
+                        valueRange = 0f..7f,
+                        steps = 6,
+                    )
+                    VoiceSliderLabel("Pitch / bass", formatDecimal(pitch))
+                    Slider(
+                        value = pitch,
+                        onValueChange = { pitch = snapToTenth(it) },
+                        valueRange = 0.5f..1.6f,
+                        steps = 10,
+                    )
                 }
-                Spacer(Modifier.height(10.dp))
-                VoiceSliderLabel("Voice variation", voiceSlot.roundToInt().toString())
-                Slider(
-                    value = voiceSlot,
-                    onValueChange = { voiceSlot = it.roundToInt().toFloat() },
-                    valueRange = 0f..7f,
-                    steps = 6,
-                )
-                VoiceSliderLabel("Pitch", formatDecimal(pitch))
-                Slider(
-                    value = pitch,
-                    onValueChange = { pitch = snapToTenth(it) },
-                    valueRange = 0.5f..1.6f,
-                    steps = 10,
-                )
                 VoiceSliderLabel("Base speaking rate", formatMultiplier(speechRate))
                 Slider(
                     value = speechRate,
@@ -1132,19 +1582,16 @@ private fun CharacterVoiceDialog(
             }
         },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    onSave(
-                        profile.copy(
-                            voiceGroup = voiceGroup,
-                            voiceSlot = voiceSlot.roundToInt(),
-                            pitch = pitch,
-                            speechRate = speechRate,
-                        ),
-                    )
-                },
-            ) {
-                Text("Save")
+            Row {
+                TextButton(
+                    enabled = speechEngineMode != SpeechEngineMode.LOCAL_GENERATIVE || installedAiVoices.isNotEmpty(),
+                    onClick = { onPreview(draftProfile()) },
+                ) {
+                    Text("Preview")
+                }
+                TextButton(onClick = { onSave(draftProfile()) }) {
+                    Text("Save")
+                }
             }
         },
         dismissButton = {
@@ -1153,6 +1600,7 @@ private fun CharacterVoiceDialog(
             }
         },
     )
+
 }
 
 @Composable

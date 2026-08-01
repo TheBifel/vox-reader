@@ -1,12 +1,16 @@
 package com.bifel.voxreader.domain.preanalysis.sidecar
 
 import com.bifel.voxreader.domain.model.CharacterProfile
+import com.bifel.voxreader.domain.model.CharacterVoiceTraits
+import com.bifel.voxreader.domain.model.CharacterAgeBand
+import com.bifel.voxreader.domain.model.GenderPresentation
 import com.bifel.voxreader.domain.model.NARRATOR_ID
 import com.bifel.voxreader.domain.model.EmotionType
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.VoiceGroup
+import com.bifel.voxreader.domain.model.VocalRegister
 import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
 import com.bifel.voxreader.domain.preanalysis.model.ATTRIBUTION_POLICY_VERSION
 import com.bifel.voxreader.domain.preanalysis.model.AttributionSource
@@ -20,6 +24,7 @@ import com.bifel.voxreader.domain.preanalysis.model.SpeakerAttribution
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 
 data class ProviderBookResult(
     val attributions: List<SpeakerAttribution>,
@@ -59,6 +64,7 @@ data class AnalysisSidecarRow(
 data class AnalysisSidecarBundle(
     val metadata: AnalysisSidecarMetadata,
     val rows: List<AnalysisSidecarRow>,
+    val characters: List<CharacterProfile> = emptyList(),
 ) {
     fun validateAgainst(
         bookId: String,
@@ -174,6 +180,50 @@ data class AnalysisSidecarBundle(
             if (previous != null && previous != definition) {
                 errors += "$label defines speaker_id '${row.speakerId}' inconsistently."
             }
+            if (row.speakerId == NARRATOR_ID && definition != narratorDefinition()) {
+                errors += "$label must use the fixed Narrator system profile."
+            }
+            if (row.speakerId == UNKNOWN_SPEAKER_ID) {
+                if (definition != unknownDefinition()) {
+                    errors += "$label must use the fixed Unknown system profile."
+                }
+                if (row.confidence != 0f || row.evidence != EvidenceKind.UNKNOWN || row.source != AttributionSource.UNKNOWN) {
+                    errors += "$label has invalid Unknown system attribution fields."
+                }
+            }
+        }
+        val seenCharacters = mutableSetOf<String>()
+        characters.forEachIndexed { index, character ->
+            val label = "Character ${index + 1}"
+            if (!seenCharacters.add(character.id)) errors += "$label duplicates speaker_id."
+            if (character.id.isBlank() || character.id.length > MAX_SPEAKER_ID_LENGTH) {
+                errors += "$label has an invalid speaker_id."
+            }
+            if (character.displayName.isBlank() || character.displayName.length > MAX_SPEAKER_NAME_LENGTH) {
+                errors += "$label has an invalid speaker_name."
+            }
+            if (character.voiceSlot < 0 || !character.pitch.isFinite() || character.pitch !in 0.5f..1.6f ||
+                !character.speechRate.isFinite() || character.speechRate !in 0.5f..1.5f
+            ) {
+                errors += "$label has an invalid voice profile."
+            }
+            val definition = CharacterDefinition(
+                character.displayName,
+                character.voiceGroup,
+                character.voiceSlot,
+                character.pitch,
+                character.speechRate,
+            )
+            val rowDefinition = characterDefinitions[character.id]
+            if (rowDefinition != null && rowDefinition != definition) {
+                errors += "$label conflicts with the phrase profile for '${character.id}'."
+            }
+            if (character.id == NARRATOR_ID && definition != narratorDefinition()) {
+                errors += "$label must use the fixed Narrator system profile."
+            }
+            if (character.id == UNKNOWN_SPEAKER_ID && definition != unknownDefinition()) {
+                errors += "$label must use the fixed Unknown system profile."
+            }
         }
         if (coverageCanBeChecked &&
             bookText.substring(previousEnd).any { !it.isWhitespace() }
@@ -195,7 +245,7 @@ data class AnalysisSidecarBundle(
         }
 
     fun toProviderResult(): ProviderBookResult {
-        val characters = rows
+        val phraseCharacters = rows
             .distinctBy(AnalysisSidecarRow::speakerId)
             .map { row ->
                 CharacterProfile(
@@ -218,9 +268,13 @@ data class AnalysisSidecarBundle(
                 emotion = row.emotion,
             )
         }
+        val explicitCharacters = characters.associateBy(CharacterProfile::id)
         return ProviderBookResult(
             attributions = attributions,
-            characters = characters,
+            characters = (phraseCharacters + explicitCharacters.values)
+                .associateBy(CharacterProfile::id)
+                .values
+                .toList(),
         )
     }
 
@@ -230,6 +284,22 @@ data class AnalysisSidecarBundle(
         val voiceSlot: Int,
         val pitch: Float,
         val speechRate: Float,
+    )
+
+    private fun narratorDefinition() = CharacterDefinition(
+        name = "Narrator",
+        group = VoiceGroup.NARRATOR,
+        voiceSlot = 0,
+        pitch = 1f,
+        speechRate = 0.96f,
+    )
+
+    private fun unknownDefinition() = CharacterDefinition(
+        name = "Unknown",
+        group = VoiceGroup.NEUTRAL,
+        voiceSlot = 0,
+        pitch = 1f,
+        speechRate = 1f,
     )
 }
 
@@ -271,6 +341,7 @@ object AnalysisSidecarJson {
             attributionPolicyVersion = metadata.attributionPolicyVersion,
             providerSchemaVersion = metadata.providerSchemaVersion,
             phrases = rows.map { it.toDocumentRow() },
+            characters = characters.map { it.toDocumentCharacter() },
         )
 
     private fun AnalysisSidecarRow.toDocumentRow() =
@@ -299,6 +370,24 @@ object AnalysisSidecarJson {
             },
         )
 
+    private fun CharacterProfile.toDocumentCharacter() =
+        SidecarCharacter(
+            speakerId = id,
+            speakerName = displayName,
+            aliases = aliases.toList().sorted(),
+            voiceGroup = voiceGroup.name,
+            voiceSlot = voiceSlot,
+            pitch = pitch,
+            speechRate = speechRate,
+            traits = traits?.let {
+                SidecarCharacterTraits(
+                    ageBand = it.ageBand.name,
+                    genderPresentation = it.genderPresentation.name,
+                    vocalRegister = it.vocalRegister.name,
+                )
+            },
+        )
+
     private fun SidecarDocument.toBundle() =
         AnalysisSidecarBundle(
             metadata = AnalysisSidecarMetadata(
@@ -312,6 +401,25 @@ object AnalysisSidecarJson {
                 providerSchemaVersion = providerSchemaVersion,
             ),
             rows = phrases.mapIndexed { index, row -> row.toDomain(index) },
+            characters = characters.mapIndexed { index, character -> character.toDomain(index) },
+        )
+
+    private fun SidecarCharacter.toDomain(index: Int) =
+        CharacterProfile(
+            id = speakerId,
+            displayName = speakerName,
+            aliases = aliases.toSet().ifEmpty { setOf(speakerName) },
+            voiceGroup = voiceGroup.requiredEnum("characters[$index].voice_group", index),
+            voiceSlot = voiceSlot,
+            pitch = pitch,
+            speechRate = speechRate,
+            traits = traits?.let {
+                CharacterVoiceTraits(
+                    ageBand = it.ageBand.requiredEnum("characters[$index].traits.age_band", index),
+                    genderPresentation = it.genderPresentation.requiredEnum("characters[$index].traits.gender_presentation", index),
+                    vocalRegister = it.vocalRegister.requiredEnum("characters[$index].traits.vocal_register", index),
+                )
+            },
         )
 
     private fun SidecarPhrase.toDomain(index: Int) =
@@ -410,6 +518,27 @@ private data class SidecarDocument(
     @SerialName("provider_schema_version")
     val providerSchemaVersion: Int,
     val phrases: List<SidecarPhrase>,
+    val characters: List<SidecarCharacter> = emptyList(),
+)
+
+@Serializable
+private data class SidecarCharacter(
+    @SerialName("speaker_id") val speakerId: String,
+    @SerialName("speaker_name") val speakerName: String,
+    val aliases: List<String> = emptyList(),
+    @SerialName("voice_group") val voiceGroup: String,
+    @SerialName("voice_slot") val voiceSlot: Int,
+    val pitch: Float,
+    @SerialName("speech_rate") val speechRate: Float,
+    val traits: SidecarCharacterTraits? = null,
+    @SerialName("character_profile") val characterProfile: JsonObject? = null,
+)
+
+@Serializable
+private data class SidecarCharacterTraits(
+    @SerialName("age_band") val ageBand: String,
+    @SerialName("gender_presentation") val genderPresentation: String,
+    @SerialName("vocal_register") val vocalRegister: String,
 )
 
 @Serializable

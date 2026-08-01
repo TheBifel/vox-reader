@@ -14,6 +14,7 @@ import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.LibraryState
 import com.bifel.voxreader.domain.model.ReaderSettings
 import com.bifel.voxreader.domain.model.StoredBook
+import com.bifel.voxreader.domain.model.SpeechEngineMode
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.repository.LibraryRepository
 import com.bifel.voxreader.domain.repository.SettingsRepository
@@ -46,6 +47,12 @@ class ReaderDataStoreRepository(
             darkTheme = preferences[Keys.DarkTheme] ?: true,
             speechControlsEnabled = preferences[Keys.SpeechControls] ?: false,
             playbackSpeed = (preferences[Keys.PlaybackSpeed] ?: 1f).coerceIn(0.5f, 2f),
+            fontSizeSp = (preferences[Keys.FontSizeSp] ?: 20f).coerceIn(14f, 32f),
+            lineHeightSp = (preferences[Keys.LineHeightSp] ?: 31f).coerceIn(18f, 48f),
+            horizontalMarginDp = (preferences[Keys.HorizontalMarginDp] ?: 24f).coerceIn(12f, 56f),
+            speechEngineMode = runCatching {
+                SpeechEngineMode.valueOf(preferences[Keys.SpeechEngineMode] ?: SpeechEngineMode.PROCEDURAL.name)
+            }.getOrDefault(SpeechEngineMode.PROCEDURAL),
         )
     }
 
@@ -114,6 +121,18 @@ class ReaderDataStoreRepository(
 
     override suspend fun setPlaybackSpeed(speed: Float) {
         dataStore.edit { it[Keys.PlaybackSpeed] = speed.coerceIn(0.5f, 2f) }
+    }
+
+    override suspend fun setReadingAppearance(fontSizeSp: Float, lineHeightSp: Float, horizontalMarginDp: Float) {
+        dataStore.edit {
+            it[Keys.FontSizeSp] = fontSizeSp.coerceIn(14f, 32f)
+            it[Keys.LineHeightSp] = lineHeightSp.coerceIn(18f, 48f)
+            it[Keys.HorizontalMarginDp] = horizontalMarginDp.coerceIn(12f, 56f)
+        }
+    }
+
+    override suspend fun setSpeechEngineMode(mode: SpeechEngineMode) {
+        dataStore.edit { it[Keys.SpeechEngineMode] = mode.name }
     }
 
     private suspend fun updateBook(
@@ -217,6 +236,10 @@ class ReaderDataStoreRepository(
         val DarkTheme = booleanPreferencesKey("dark_theme")
         val SpeechControls = booleanPreferencesKey("speech_controls")
         val PlaybackSpeed = floatPreferencesKey("playback_speed")
+        val FontSizeSp = floatPreferencesKey("font_size_sp")
+        val LineHeightSp = floatPreferencesKey("line_height_sp")
+        val HorizontalMarginDp = floatPreferencesKey("horizontal_margin_dp")
+        val SpeechEngineMode = stringPreferencesKey("speech_engine_mode")
         val LatestBookId = stringPreferencesKey("latest_book_id")
         val Books = stringPreferencesKey("books_json")
     }

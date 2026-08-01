@@ -5,6 +5,18 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val stageRuntimeAssets by tasks.registering(Sync::class) {
+    from("src/main/assets") {
+        exclude(
+            "vits-piper-en_US-amy-low/en_US-amy-low.onnx",
+            "vits-piper-en_US-amy-low/en_US-amy-low.onnx.json",
+            "vits-piper-en_US-amy-low/MODEL_CARD",
+            "vits-piper-en_US-ryan-low/**",
+        )
+    }
+    into(layout.buildDirectory.dir("generated/runtimeAssets"))
+}
+
 android {
     namespace = "com.bifel.voxreader"
     compileSdk = 36
@@ -43,7 +55,12 @@ android {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
 
+    // Piper model binaries are installed by the user into app-private storage.
+    sourceSets.getByName("main").assets.setSrcDirs(listOf(layout.buildDirectory.dir("generated/runtimeAssets")))
+
 }
+
+tasks.named("preBuild").configure { dependsOn(stageRuntimeAssets) }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
@@ -65,6 +82,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
