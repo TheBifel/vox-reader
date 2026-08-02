@@ -40,6 +40,8 @@ class MainActivity : ComponentActivity() {
             proceduralVoiceCatalog = container.speechEngine,
             generativeSpeechEngine = container.generativeSpeechEngine,
             piperVoicePackManager = container.piperVoicePackManager,
+            advancedSpeechEngine = container.advancedSpeechEngine,
+            advancedVoiceModelManager = container.advancedVoiceModelManager,
             portableAnalysisService = container.portableAnalysisService,
             playbackNotificationController = container.playbackNotificationController,
         )
@@ -109,6 +111,9 @@ class MainActivity : ComponentActivity() {
                         onDownloadLocalVoice = viewModel::downloadLocalVoice,
                         onRemoveLocalVoice = viewModel::removeLocalVoice,
                         onPreviewLocalVoice = viewModel::previewLocalVoice,
+                        onDownloadAdvancedModel = viewModel::downloadAdvancedModel,
+                        onRemoveAdvancedModel = viewModel::removeAdvancedModel,
+                        onPreviewAdvancedVoice = viewModel::previewAdvancedVoice,
                         onLoadProceduralVoices = viewModel::loadProceduralVoices,
                         onPreviewProceduralVoice = viewModel::previewProceduralVoice,
                         onUpdateCharacterVoice = viewModel::updateCharacterVoice,

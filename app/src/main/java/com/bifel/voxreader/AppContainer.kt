@@ -12,6 +12,8 @@ import com.bifel.voxreader.data.speech.AndroidSpeechEngine
 import com.bifel.voxreader.data.speech.SherpaPiperSpeechEngine
 import com.bifel.voxreader.data.speech.PiperVoicePackManager
 import com.bifel.voxreader.data.speech.AndroidPlaybackNotificationController
+import com.bifel.voxreader.data.speech.AdvancedVoiceModelManager
+import com.bifel.voxreader.data.speech.SherpaKittenSpeechEngine
 import com.bifel.voxreader.domain.usecase.ImportBookUseCase
 import com.bifel.voxreader.domain.usecase.LoadLatestBookUseCase
 
@@ -27,6 +29,8 @@ class AppContainer(application: Application) {
     val speechEngine = AndroidSpeechEngine(application)
     val piperVoicePackManager = PiperVoicePackManager(application)
     val generativeSpeechEngine = SherpaPiperSpeechEngine(application, piperVoicePackManager)
+    val advancedVoiceModelManager = AdvancedVoiceModelManager(application)
+    val advancedSpeechEngine = SherpaKittenSpeechEngine(application, advancedVoiceModelManager)
     val playbackNotificationController = AndroidPlaybackNotificationController(application)
     val importBook = ImportBookUseCase(bookRepository, libraryRepository)
     val loadLatestBook = LoadLatestBookUseCase(bookRepository, libraryRepository)

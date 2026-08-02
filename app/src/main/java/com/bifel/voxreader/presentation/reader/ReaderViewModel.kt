@@ -34,6 +34,7 @@ import com.bifel.voxreader.domain.speech.ProceduralVoiceCatalog
 import com.bifel.voxreader.domain.speech.ProceduralVoiceLanguage
 import com.bifel.voxreader.data.speech.PiperVoicePackManager
 import com.bifel.voxreader.data.speech.VoicePackLanguage
+import com.bifel.voxreader.data.speech.AdvancedVoiceModelManager
 import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.domain.text.SentenceSegmenter
 import com.bifel.voxreader.domain.usecase.ImportBookUseCase
@@ -60,6 +61,8 @@ class ReaderViewModel(
     private val proceduralVoiceCatalog: ProceduralVoiceCatalog,
     private val generativeSpeechEngine: SpeechEngine,
     private val piperVoicePackManager: PiperVoicePackManager,
+    private val advancedSpeechEngine: SpeechEngine,
+    private val advancedVoiceModelManager: AdvancedVoiceModelManager,
     private val portableAnalysisService: PortableAnalysisService,
     private val playbackNotificationController: PlaybackNotificationController,
 ) : ViewModel() {
@@ -129,11 +132,25 @@ class ReaderViewModel(
             generativeSpeechEngine.events.collect(::handleSpeechEvent)
         }
         viewModelScope.launch {
+            advancedSpeechEngine.events.collect(::handleSpeechEvent)
+        }
+        viewModelScope.launch {
             piperVoicePackManager.packs.collect { packs ->
                 mutableUiState.update {
                     it.copy(
                         localVoicePacks = packs,
                         localGenerativeVoiceAvailable = packs.any { pack -> pack.installed },
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            advancedVoiceModelManager.model.collect { model ->
+                mutableUiState.update {
+                    it.copy(
+                        advancedVoiceModel = model,
+                        advancedVoices = advancedVoiceModelManager.voices,
+                        advancedVoiceAvailable = model.installed,
                     )
                 }
             }
@@ -281,6 +298,40 @@ class ReaderViewModel(
         viewModelScope.launch { piperVoicePackManager.remove(id) }
     }
 
+    fun downloadAdvancedModel() {
+        viewModelScope.launch { advancedVoiceModelManager.download() }
+    }
+
+    fun removeAdvancedModel() {
+        resetSpeechPipeline()
+        viewModelScope.launch { advancedVoiceModelManager.remove() }
+    }
+
+    fun previewAdvancedVoice(id: String) {
+        val voice = advancedVoiceModelManager.voices.firstOrNull { it.id == id } ?: return
+        resetSpeechPipeline()
+        mutableUiState.update {
+            it.copy(playbackState = if (it.speechControlsEnabled) PlaybackState.PAUSED else PlaybackState.DISABLED)
+        }
+        viewModelScope.launch {
+            runCatching {
+                advancedSpeechEngine.awaitReady()
+                advancedSpeechEngine.enqueue(
+                    SpeechRequest(
+                        utteranceId = "advanced-preview:${voice.id}:${System.nanoTime()}",
+                        text = "Hello, this is how the advanced ${voice.displayName} voice sounds.",
+                        voiceSlot = voice.speakerId,
+                        voiceGroup = voice.voiceGroup,
+                        pitch = 1f,
+                        speechRate = 1f,
+                        advancedVoiceId = voice.id,
+                    ),
+                    SpeechQueueMode.FLUSH,
+                )
+            }.onFailure(::showError)
+        }
+    }
+
     fun previewLocalVoice(id: String) {
         val installed = piperVoicePackManager.installedPacks()
         val pack = installed.firstOrNull { it.id == id } ?: return
@@ -349,6 +400,7 @@ class ReaderViewModel(
                 speechRate = profile.speechRate,
                 proceduralVoiceId = profile.proceduralVoiceId,
                 localVoicePackId = profile.localVoicePackId,
+                advancedVoiceId = profile.advancedVoiceId,
                     ),
                     SpeechQueueMode.FLUSH,
                 )
@@ -602,6 +654,13 @@ class ReaderViewModel(
             showError(IllegalStateException("Local AI voice is selected, but no compatible voice model is installed yet."))
             return
         }
+        if (
+            state.speechEngineMode == SpeechEngineMode.LOCAL_ADVANCED &&
+            !advancedVoiceModelManager.installed()
+        ) {
+            showError(IllegalStateException("Advanced AI is selected, but KittenTTS Micro is not installed yet."))
+            return
+        }
 
         val requestedIndex = state.activePhraseIndex
             ?.coerceIn(state.phrases.indices)
@@ -773,6 +832,8 @@ class ReaderViewModel(
                 pitch = pitch,
                 speechRate = speechRate,
                 proceduralVoiceId = profile.proceduralVoiceId,
+                localVoicePackId = profile.localVoicePackId,
+                advancedVoiceId = profile.advancedVoiceId,
                 pauseAfterMillis = delivery.pauseAfterMillis,
             ),
             queueMode = queueMode,
@@ -821,7 +882,12 @@ class ReaderViewModel(
                     includeStart = false,
                 )
                 when {
-                    !speechBuffer.isEmpty -> replenishSpeechBuffer()
+                    !speechBuffer.isEmpty -> {
+                        // The neural player may be waiting for the next generated PCM buffer.
+                        // Started immediately changes this back to PLAYING when audio is already ready.
+                        mutableUiState.update { it.copy(playbackState = PlaybackState.PREPARING) }
+                        replenishSpeechBuffer()
+                    }
                     nextIndex == null -> {
                         mutableUiState.update { it.copy(playbackState = PlaybackState.PAUSED) }
                     }
@@ -933,6 +999,7 @@ class ReaderViewModel(
         speechBuffer.clear()
         speechEngine.stop()
         generativeSpeechEngine.stop()
+        advancedSpeechEngine.stop()
     }
 
     private fun showError(error: Throwable) {
@@ -967,6 +1034,7 @@ class ReaderViewModel(
     private fun activeSpeechEngine(): SpeechEngine = when (mutableUiState.value.speechEngineMode) {
         SpeechEngineMode.PROCEDURAL -> speechEngine
         SpeechEngineMode.LOCAL_GENERATIVE -> generativeSpeechEngine
+        SpeechEngineMode.LOCAL_ADVANCED -> advancedSpeechEngine
     }
 
     private fun applyVoiceOverrides(
@@ -987,6 +1055,7 @@ class ReaderViewModel(
                 pitch = override.pitch,
                 speechRate = override.speechRate,
                 localVoicePackId = override.localVoicePackId,
+                advancedVoiceId = override.advancedVoiceId,
             )
         }
     }
@@ -1007,6 +1076,8 @@ class ReaderViewModel(
         private val proceduralVoiceCatalog: ProceduralVoiceCatalog,
         private val generativeSpeechEngine: SpeechEngine,
         private val piperVoicePackManager: PiperVoicePackManager,
+        private val advancedSpeechEngine: SpeechEngine,
+        private val advancedVoiceModelManager: AdvancedVoiceModelManager,
         private val portableAnalysisService: PortableAnalysisService,
         private val playbackNotificationController: PlaybackNotificationController,
     ) : ViewModelProvider.Factory {
@@ -1021,6 +1092,8 @@ class ReaderViewModel(
                 proceduralVoiceCatalog = proceduralVoiceCatalog,
                 generativeSpeechEngine = generativeSpeechEngine,
                 piperVoicePackManager = piperVoicePackManager,
+                advancedSpeechEngine = advancedSpeechEngine,
+                advancedVoiceModelManager = advancedVoiceModelManager,
                 portableAnalysisService = portableAnalysisService,
                 playbackNotificationController = playbackNotificationController,
             ) as T

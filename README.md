@@ -3,7 +3,7 @@
 VoxReader is an offline-first Android EPUB reader that reads books aloud while assigning stable
 voice variations to recurring characters. The proof of concept is built with Kotlin, Jetpack
 Compose, MVVM, DataStore, portable speaker-analysis JSON files, Android's local text-to-speech
-service, and optional downloaded on-device Piper voice packs.
+service, and optional downloaded on-device Piper or KittenTTS Micro voices.
 
 See [Product and solution overview](docs/PRODUCT_AND_SOLUTION.md) for the product goal, user flow,
 architecture, processing pipeline, current limitations, and implementation roadmap.
@@ -30,7 +30,8 @@ Android's **Open with** flow.
 - Tap the centre of a page to reveal the reading controls and hamburger menu.
 - The table of contents is collapsed by default; expand it only when you want to jump chapters.
 - **Characters and voices** opens a focused dialog for colour legend and per-character voice tuning.
-- **Voice engine** opens the local AI model library. Each model shows a concise use-oriented
+- **Voice engine** selects Procedural, AI Simple (Piper), or AI Advanced (KittenTTS Micro).
+- The matching local AI model screen shows a concise use-oriented
   description, its installed size, download status/progress, and explicit **Play**, **Download**,
   or **Remove** controls.
 - While a book is playing, VoxReader uses Android media controls and a foreground playback service.

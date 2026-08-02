@@ -118,6 +118,8 @@ import com.bifel.voxreader.domain.model.ReaderOrientation
 import com.bifel.voxreader.domain.model.ReaderImageSize
 import com.bifel.voxreader.domain.model.ReaderImageAlignment
 import com.bifel.voxreader.data.speech.PiperVoicePack
+import com.bifel.voxreader.data.speech.AdvancedVoice
+import com.bifel.voxreader.data.speech.AdvancedVoiceModel
 import com.bifel.voxreader.data.speech.VoicePackDownloadState
 import com.bifel.voxreader.data.speech.VoicePackLanguage
 import com.bifel.voxreader.domain.speech.SpeechText
@@ -148,6 +150,9 @@ fun ReaderScreen(
     onDownloadLocalVoice: (String) -> Unit,
     onRemoveLocalVoice: (String) -> Unit,
     onPreviewLocalVoice: (String) -> Unit,
+    onDownloadAdvancedModel: () -> Unit,
+    onRemoveAdvancedModel: () -> Unit,
+    onPreviewAdvancedVoice: (String) -> Unit,
     onLoadProceduralVoices: () -> Unit,
     onPreviewProceduralVoice: (String) -> Unit,
     onUpdateCharacterVoice: (CharacterProfile) -> Unit,
@@ -176,6 +181,7 @@ fun ReaderScreen(
     var showCharacters by remember { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var showVoiceModels by remember { mutableStateOf(false) }
+    var showAdvancedVoiceModels by remember { mutableStateOf(false) }
     var showProceduralVoices by remember { mutableStateOf(false) }
     var showColors by remember { mutableStateOf(false) }
     var showDisplay by remember { mutableStateOf(false) }
@@ -243,11 +249,20 @@ fun ReaderScreen(
                 onBack = { showProceduralVoices = false },
                 onPreview = onPreviewProceduralVoice,
             )
+            showSettings && showAdvancedVoiceModels -> AdvancedVoiceModelsScreen(
+                model = state.advancedVoiceModel,
+                voices = state.advancedVoices,
+                onBack = { showAdvancedVoiceModels = false },
+                onDownload = onDownloadAdvancedModel,
+                onRemove = onRemoveAdvancedModel,
+                onPreview = onPreviewAdvancedVoice,
+            )
             showSettings -> SettingsScreen(
                 state = state,
                 onBack = { showSettings = false },
                 onShowAppearance = { showAppearance = true },
                 onShowVoiceModels = { showVoiceModels = true },
+                onShowAdvancedVoiceModels = { showAdvancedVoiceModels = true },
                 onShowProceduralVoices = {
                     onLoadProceduralVoices()
                     showProceduralVoices = true
@@ -320,6 +335,8 @@ fun ReaderScreen(
                 profile = profile,
                 speechEngineMode = state.speechEngineMode,
                 localVoicePacks = state.localVoicePacks,
+                advancedVoices = state.advancedVoices,
+                advancedVoiceAvailable = state.advancedVoiceAvailable,
                 onDismiss = { editingCharacterId = null },
                 onPreview = onPreviewCharacterVoice,
                 onSave = {
@@ -500,6 +517,7 @@ private fun SettingsScreen(
     onBack: () -> Unit,
     onShowAppearance: () -> Unit,
     onShowVoiceModels: () -> Unit,
+    onShowAdvancedVoiceModels: () -> Unit,
     onShowProceduralVoices: () -> Unit,
     onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
     onShowColors: () -> Unit,
@@ -552,24 +570,34 @@ private fun SettingsScreen(
         )
         ListItem(
             headlineContent = {
-                Text(if (state.speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE) "Voice engine: Local AI" else "Voice engine: Procedural")
+                Text(
+                    when (state.speechEngineMode) {
+                        SpeechEngineMode.PROCEDURAL -> "Voice engine: Procedural"
+                        SpeechEngineMode.LOCAL_GENERATIVE -> "Voice engine: AI Simple"
+                        SpeechEngineMode.LOCAL_ADVANCED -> "Voice engine: AI Advanced"
+                    },
+                )
             },
             supportingContent = { Text("Choose the engine used for character speech") },
             modifier = Modifier.clickable {
                 showEngineDialog = true
             },
         )
-        if (state.speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE) {
-            ListItem(
-                headlineContent = { Text("AI voice models") },
-                supportingContent = { Text("Download, preview, or remove offline voice packs") },
-                modifier = Modifier.clickable(onClick = onShowVoiceModels),
-            )
-        } else {
-            ListItem(
+        when (state.speechEngineMode) {
+            SpeechEngineMode.PROCEDURAL -> ListItem(
                 headlineContent = { Text("Procedural voices") },
                 supportingContent = { Text("Preview installed offline English and Ukrainian system voices") },
                 modifier = Modifier.clickable(onClick = onShowProceduralVoices),
+            )
+            SpeechEngineMode.LOCAL_GENERATIVE -> ListItem(
+                headlineContent = { Text("AI Simple models") },
+                supportingContent = { Text("Download, preview, or remove fast Piper voice packs") },
+                modifier = Modifier.clickable(onClick = onShowVoiceModels),
+            )
+            SpeechEngineMode.LOCAL_ADVANCED -> ListItem(
+                headlineContent = { Text("AI Advanced model") },
+                supportingContent = { Text("Configure KittenTTS Micro, download it, and preview voices") },
+                modifier = Modifier.clickable(onClick = onShowAdvancedVoiceModels),
             )
         }
         Spacer(Modifier.height(32.dp))
@@ -578,6 +606,7 @@ private fun SettingsScreen(
         showEngineDialog = showEngineDialog,
         speechEngineMode = state.speechEngineMode,
         localGenerativeVoiceAvailable = state.localGenerativeVoiceAvailable,
+        advancedVoiceAvailable = state.advancedVoiceAvailable,
         onShowEngineDialog = { showEngineDialog = it },
         onSetSpeechEngineMode = onSetSpeechEngineMode,
     )
@@ -2053,6 +2082,7 @@ private fun VoiceEngineDialogs(
     showEngineDialog: Boolean,
     speechEngineMode: SpeechEngineMode,
     localGenerativeVoiceAvailable: Boolean,
+    advancedVoiceAvailable: Boolean,
     onShowEngineDialog: (Boolean) -> Unit,
     onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
 ) {
@@ -2071,7 +2101,7 @@ private fun VoiceEngineDialogs(
                         onShowEngineDialog(false)
                     }
                     EngineChoice(
-                        title = "Local AI voice",
+                        title = "AI Simple",
                         description = if (localGenerativeVoiceAvailable) {
                             "Uses downloaded AI voice packs and buffers speech on this device."
                         } else {
@@ -2080,6 +2110,18 @@ private fun VoiceEngineDialogs(
                         selected = speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE,
                     ) {
                         onSetSpeechEngineMode(SpeechEngineMode.LOCAL_GENERATIVE)
+                        onShowEngineDialog(false)
+                    }
+                    EngineChoice(
+                        title = "AI Advanced",
+                        description = if (advancedVoiceAvailable) {
+                            "Uses the faster KittenTTS Micro model with eight English voices."
+                        } else {
+                            "Select it, then download KittenTTS Micro from AI Advanced model settings."
+                        },
+                        selected = speechEngineMode == SpeechEngineMode.LOCAL_ADVANCED,
+                    ) {
+                        onSetSpeechEngineMode(SpeechEngineMode.LOCAL_ADVANCED)
                         onShowEngineDialog(false)
                     }
                 }
@@ -2156,6 +2198,122 @@ private fun VoiceModelsScreen(
                 }) { Text("Remove") }
             },
             dismissButton = { TextButton(onClick = { voicePendingRemoval = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun AdvancedVoiceModelsScreen(
+    model: AdvancedVoiceModel?,
+    voices: List<AdvancedVoice>,
+    onBack: () -> Unit,
+    onDownload: () -> Unit,
+    onRemove: () -> Unit,
+    onPreview: (String) -> Unit,
+) {
+    var confirmRemoval by remember { mutableStateOf(false) }
+    var voicesExpanded by remember { mutableStateOf(true) }
+    BackHandler(onBack = onBack)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(58.dp)
+                .padding(horizontal = 8.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.SkipPrevious, contentDescription = "Back to settings")
+            }
+            Text("AI Advanced model", style = MaterialTheme.typography.titleLarge)
+        }
+        HorizontalDivider()
+        Column(Modifier.verticalScroll(rememberScrollState())) {
+            model?.let { current ->
+                ListItem(
+                    headlineContent = { Text(current.displayName) },
+                    supportingContent = {
+                        Column {
+                            Text(current.description)
+                            Text(
+                                when (current.downloadState) {
+                                    VoicePackDownloadState.INSTALLED ->
+                                        "Installed - ${formatVoicePackSize(current.installedSizeBytes)}"
+                                    VoicePackDownloadState.DOWNLOADING ->
+                                        "Downloading ${((current.downloadProgress ?: 0f) * 100).roundToInt()}% of about ${formatVoicePackSize(current.downloadSizeBytes)}"
+                                    VoicePackDownloadState.FAILED -> current.error ?: "Download failed"
+                                    VoicePackDownloadState.NOT_INSTALLED ->
+                                        "Not installed - about ${formatVoicePackSize(current.downloadSizeBytes)} download"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (current.downloadState == VoicePackDownloadState.DOWNLOADING) {
+                                LinearProgressIndicator(
+                                    progress = { current.downloadProgress ?: 0f },
+                                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                                )
+                            }
+                        }
+                    },
+                    trailingContent = {
+                        when {
+                            current.installed -> TextButton(onClick = { confirmRemoval = true }) { Text("Remove") }
+                            current.downloadState == VoicePackDownloadState.DOWNLOADING -> Unit
+                            else -> TextButton(onClick = onDownload) { Text("Download") }
+                        }
+                    },
+                )
+                ListItem(
+                    headlineContent = { Text("English voices") },
+                    supportingContent = { Text("${voices.size} English voices included in one model") },
+                    trailingContent = {
+                        Icon(
+                            if (voicesExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                        )
+                    },
+                    modifier = Modifier.clickable { voicesExpanded = !voicesExpanded },
+                )
+                AnimatedVisibility(voicesExpanded) {
+                    Column {
+                        voices.forEach { voice ->
+                            ListItem(
+                                headlineContent = { Text(voice.displayName) },
+                                supportingContent = {
+                                    Text(voice.voiceGroup.name.lowercase().replaceFirstChar(Char::uppercase))
+                                },
+                                trailingContent = {
+                                    TextButton(
+                                        enabled = current.installed,
+                                        onClick = { onPreview(voice.id) },
+                                    ) { Text("Play") }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+    if (confirmRemoval) {
+        AlertDialog(
+            onDismissRequest = { confirmRemoval = false },
+            title = { Text("Remove advanced model?") },
+            text = { Text("This deletes KittenTTS Micro and all of its voices from this device.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    onRemove()
+                    confirmRemoval = false
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemoval = false }) { Text("Cancel") } },
         )
     }
 }
@@ -2340,6 +2498,8 @@ private fun CharacterVoiceDialog(
     profile: CharacterProfile,
     speechEngineMode: SpeechEngineMode,
     localVoicePacks: List<PiperVoicePack>,
+    advancedVoices: List<AdvancedVoice>,
+    advancedVoiceAvailable: Boolean,
     onDismiss: () -> Unit,
     onPreview: (CharacterProfile) -> Unit,
     onSave: (CharacterProfile) -> Unit,
@@ -2352,6 +2512,12 @@ private fun CharacterVoiceDialog(
         ?: installedAiVoices.firstOrNull()
     var selectedAiVoiceId by remember(profile.id, localVoicePacks) {
         mutableStateOf(initialAiVoice?.id)
+    }
+    val initialAdvancedVoice = advancedVoices.firstOrNull { it.id == profile.advancedVoiceId }
+        ?: advancedVoices.firstOrNull { it.voiceGroup == profile.voiceGroup }
+        ?: advancedVoices.firstOrNull()
+    var selectedAdvancedVoiceId by remember(profile.id, advancedVoices) {
+        mutableStateOf(initialAdvancedVoice?.id)
     }
     var voiceGroup by remember(profile.id, profile.voiceGroup) {
         mutableStateOf(profile.voiceGroup)
@@ -2367,16 +2533,32 @@ private fun CharacterVoiceDialog(
     }
     fun draftProfile(): CharacterProfile {
         val selectedAiVoice = installedAiVoices.firstOrNull { it.id == selectedAiVoiceId }
+        val selectedAdvancedVoice = advancedVoices.firstOrNull { it.id == selectedAdvancedVoiceId }
         val aiVoiceSlot = selectedAiVoice?.let { selected ->
             installedAiVoices.filter { it.voiceGroup == selected.voiceGroup }.indexOf(selected)
         } ?: voiceSlot.roundToInt()
-        return profile.copy(
-            voiceGroup = selectedAiVoice?.voiceGroup ?: voiceGroup,
-            voiceSlot = aiVoiceSlot,
-            localVoicePackId = selectedAiVoice?.id,
-            pitch = pitch,
-            speechRate = speechRate,
-        )
+        return when (speechEngineMode) {
+            SpeechEngineMode.PROCEDURAL -> profile.copy(
+                voiceGroup = voiceGroup,
+                voiceSlot = voiceSlot.roundToInt(),
+                pitch = pitch,
+                speechRate = speechRate,
+            )
+            SpeechEngineMode.LOCAL_GENERATIVE -> profile.copy(
+                voiceGroup = selectedAiVoice?.voiceGroup ?: voiceGroup,
+                voiceSlot = aiVoiceSlot,
+                localVoicePackId = selectedAiVoice?.id,
+                pitch = pitch,
+                speechRate = speechRate,
+            )
+            SpeechEngineMode.LOCAL_ADVANCED -> profile.copy(
+                voiceGroup = selectedAdvancedVoice?.voiceGroup ?: voiceGroup,
+                voiceSlot = selectedAdvancedVoice?.speakerId ?: voiceSlot.roundToInt(),
+                advancedVoiceId = selectedAdvancedVoice?.id,
+                pitch = pitch,
+                speechRate = speechRate,
+            )
+        }
     }
 
     fun previewProfileFor(pack: PiperVoicePack): CharacterProfile =
@@ -2386,6 +2568,15 @@ private fun CharacterVoiceDialog(
                 .filter { it.voiceGroup == pack.voiceGroup }
                 .indexOf(pack),
             localVoicePackId = pack.id,
+            pitch = pitch,
+            speechRate = speechRate,
+        )
+
+    fun previewProfileFor(voice: AdvancedVoice): CharacterProfile =
+        profile.copy(
+            voiceGroup = voice.voiceGroup,
+            voiceSlot = voice.speakerId,
+            advancedVoiceId = voice.id,
             pitch = pitch,
             speechRate = speechRate,
         )
@@ -2441,6 +2632,43 @@ private fun CharacterVoiceDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                } else if (speechEngineMode == SpeechEngineMode.LOCAL_ADVANCED) {
+                    Text("KittenTTS voice", style = MaterialTheme.typography.labelLarge)
+                    if (!advancedVoiceAvailable) {
+                        Text(
+                            "The AI Advanced model is not installed. Download it from AI Advanced model settings.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        advancedVoices.forEach { voice ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                RadioButton(
+                                    selected = selectedAdvancedVoiceId == voice.id,
+                                    onClick = { selectedAdvancedVoiceId = voice.id },
+                                    colors = themedRadioButtonColors(),
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(voice.displayName)
+                                    Text(
+                                        voice.voiceGroup.name.lowercase().replaceFirstChar(Char::uppercase),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(onClick = { onPreview(previewProfileFor(voice)) }) {
+                                    Text("Play")
+                                }
+                            }
+                        }
+                    }
+                    Text(
+                        "Voice character and pitch are model-defined. Speaking rate is applied during generation.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 } else {
                     Text("Voice family", style = MaterialTheme.typography.labelLarge)
                     VoiceGroup.entries.forEach { option ->
@@ -2490,7 +2718,7 @@ private fun CharacterVoiceDialog(
         },
         confirmButton = {
             Row {
-                if (speechEngineMode != SpeechEngineMode.LOCAL_GENERATIVE) {
+                if (speechEngineMode == SpeechEngineMode.PROCEDURAL) {
                     TextButton(onClick = { onPreview(draftProfile()) }) {
                         Text("Preview")
                     }

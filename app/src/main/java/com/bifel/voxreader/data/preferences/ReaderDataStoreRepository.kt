@@ -271,6 +271,7 @@ class ReaderDataStoreRepository(
         put("speechRate", speechRate.toDouble())
         put("proceduralVoiceId", proceduralVoiceId)
         put("localVoicePackId", localVoicePackId)
+        put("advancedVoiceId", advancedVoiceId)
     }
 
     private fun JSONObject.toStoredBook(): StoredBook {
@@ -311,6 +312,7 @@ class ReaderDataStoreRepository(
             speechRate = optDouble("speechRate", 1.0).toFloat(),
             proceduralVoiceId = optString("proceduralVoiceId").takeIf(String::isNotBlank),
             localVoicePackId = optString("localVoicePackId").takeIf(String::isNotBlank),
+            advancedVoiceId = optString("advancedVoiceId").takeIf(String::isNotBlank),
         )
     }
 

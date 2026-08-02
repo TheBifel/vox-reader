@@ -12,6 +12,8 @@ import com.bifel.voxreader.domain.model.ReaderOrientation
 import com.bifel.voxreader.domain.model.ReaderImageSize
 import com.bifel.voxreader.domain.model.ReaderImageAlignment
 import com.bifel.voxreader.data.speech.PiperVoicePack
+import com.bifel.voxreader.data.speech.AdvancedVoice
+import com.bifel.voxreader.data.speech.AdvancedVoiceModel
 import com.bifel.voxreader.domain.speech.ProceduralVoice
 
 enum class PlaybackState {
@@ -58,6 +60,9 @@ data class ReaderUiState(
     val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
     val localGenerativeVoiceAvailable: Boolean = false,
     val localVoicePacks: List<PiperVoicePack> = emptyList(),
+    val advancedVoiceModel: AdvancedVoiceModel? = null,
+    val advancedVoices: List<AdvancedVoice> = emptyList(),
+    val advancedVoiceAvailable: Boolean = false,
     val proceduralVoices: List<ProceduralVoice> = emptyList(),
     val chromeVisible: Boolean = false,
     val playbackState: PlaybackState = PlaybackState.DISABLED,

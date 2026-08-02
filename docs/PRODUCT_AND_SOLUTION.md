@@ -114,18 +114,20 @@ flowchart LR
     I --> P["Choose offline Android voice and saved profile"]
     J --> P
     P --> Q["Apply global speed and optional phrase emotion"]
-    Q --> S["Queue current sentence plus two look-ahead sentences"]
+    Q --> S["Queue current sentence plus five look-ahead sentences"]
     S --> R["Speak and highlight the current TTS range"]
     R --> T["Refill the rolling three-sentence queue"]
     T --> R
 ```
 
-The app generates speech in real time and does not prerecord a chapter or complete book. It keeps
-three sentence utterances in Android TTS: the sentence being spoken and two look-ahead sentences.
-Each queued request snapshots its character voice, pitch, rate, and emotion pause. When one
-utterance completes, Android starts the next prepared request and VoxReader appends another
-sentence to the tail. This removes the voice-loading pause from normal character changes while
-retaining deterministic previous/next controls.
+The app generates speech in real time and does not prerecord a chapter or complete book. The
+ViewModel maintains a rolling queue of the current phrase plus five look-ahead phrases. Each
+request snapshots its character voice, pitch, rate, and emotion pause. Procedural Android TTS uses
+the platform queue. Both neural engines use one shared PCM pipeline: a generation worker renders
+phrases in order while a separate playback worker consumes already prepared audio. An eight-entry
+LRU cache normally retains the five phrases ahead and roughly three recently heard phrases, making
+short backward navigation instant. If generation genuinely falls behind playback, the standard
+preparation spinner is shown until the next PCM buffer is ready.
 
 ## Architecture
 
@@ -235,7 +237,14 @@ the user's settings.
 
 ## Speech generation
 
-`AndroidSpeechEngine` wraps the platform `TextToSpeech` API. It:
+VoxReader exposes three interchangeable implementations of the `SpeechEngine` contract:
+
+- **Procedural** wraps Android's platform `TextToSpeech` service;
+- **AI Simple** runs downloaded Piper voices locally through sherpa-onnx; and
+- **AI Advanced** runs the compact eight-speaker KittenTTS Micro model locally through
+  sherpa-onnx.
+
+`AndroidSpeechEngine`:
 
 - filters out voices that report requiring a network connection;
 - selects one installed English locale pack with both male and female choices, avoiding expensive
@@ -254,11 +263,12 @@ moves away from neutral. User-edited voice settings are kept separately from the
 so reimporting an updated analysis does not erase those choices.
 
 Speech is generated in real time. Look-ahead requests are submitted while the current sentence is
-playing, so the completion callback advances to already queued audio instead of starting synthesis
-from scratch. Neutral delivery adds no artificial inter-sentence delay; an explicit sadness pause
-is queued by Android TTS and does not block application code. Pausing clears the rolling queue and
-stops the current synthesis; resuming rebuilds the queue from the selected sentence because
-Android's standard TTS API does not expose sample-accurate pause/resume.
+playing, so playback advances to queued Android TTS work or already generated neural PCM instead of
+starting synthesis at the transition. Piper and Kitten share cancellation, AudioTrack playback,
+look-ahead generation, and in-memory backward caching rather than implementing separate queue
+semantics. Neutral delivery adds no artificial inter-sentence delay; an explicit sadness pause is
+applied after the phrase. Pausing clears the rolling queue and stops the current playback; resuming
+rebuilds it from the selected sentence.
 
 ## Planned evolution
 
@@ -269,11 +279,11 @@ Android's standard TTS API does not expose sample-accurate pause/resume.
 - Add font size, margins, and line-spacing controls.
 - Improve long-sentence and nested-quotation handling.
 
-### Consistent bundled neural voices
+### Consistent local neural voices
 
-If device-dependent Android voices are not good enough, add a `SpeechEngine` backed by
-sherpa-onnx and a lightweight Kokoro model. This would make voice quality and the voice catalogue
-consistent across phones while preserving the same ViewModel, controls, and highlighting flow.
+Piper and KittenTTS Micro provide device-independent offline voices through the same speech
+contract as Android TTS. Model files are downloaded on demand into app-private storage rather than
+inflating the base APK. Future neural models can reuse the shared buffered PCM pipeline.
 
 ### Product features beyond the POC
 

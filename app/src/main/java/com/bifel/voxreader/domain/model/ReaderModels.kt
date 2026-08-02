@@ -89,6 +89,7 @@ enum class ReadingMode {
 enum class SpeechEngineMode {
     PROCEDURAL,
     LOCAL_GENERATIVE,
+    LOCAL_ADVANCED,
 }
 
 enum class VoiceGroup {
@@ -119,6 +120,7 @@ data class CharacterProfile(
     val speechRate: Float = 1f,
     val proceduralVoiceId: String? = null,
     val localVoicePackId: String? = null,
+    val advancedVoiceId: String? = null,
     val traits: CharacterVoiceTraits? = null,
 )
 

@@ -27,6 +27,7 @@ data class SpeechRequest(
     val speechRate: Float,
     val proceduralVoiceId: String? = null,
     val localVoicePackId: String? = null,
+    val advancedVoiceId: String? = null,
     val pauseAfterMillis: Long = 0L,
 )
 
