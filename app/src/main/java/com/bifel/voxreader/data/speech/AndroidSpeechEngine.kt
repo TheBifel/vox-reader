@@ -12,16 +12,21 @@ import com.bifel.voxreader.domain.speech.SpeechEngine
 import com.bifel.voxreader.domain.speech.SpeechEvent
 import com.bifel.voxreader.domain.speech.SpeechQueueMode
 import com.bifel.voxreader.domain.speech.SpeechRequest
+import com.bifel.voxreader.domain.speech.ProceduralVoice
+import com.bifel.voxreader.domain.speech.ProceduralVoiceCatalog
+import com.bifel.voxreader.domain.speech.ProceduralVoiceLanguage
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 
 class AndroidSpeechEngine(
     context: Context,
-) : SpeechEngine {
+) : SpeechEngine, ProceduralVoiceCatalog {
 
     private val applicationContext = context.applicationContext
     private val mutableEvents = MutableSharedFlow<SpeechEvent>(
@@ -30,6 +35,8 @@ class AndroidSpeechEngine(
     override val events: SharedFlow<SpeechEvent> = mutableEvents.asSharedFlow()
 
     private val initialization = MutableStateFlow<Initialization>(Initialization.NotStarted)
+    private val mutableProceduralVoices = MutableStateFlow<List<ProceduralVoice>>(emptyList())
+    override val proceduralVoices: StateFlow<List<ProceduralVoice>> = mutableProceduralVoices.asStateFlow()
     private var offlineVoices: List<Voice> = emptyList()
     private var maleVoices: List<Voice> = emptyList()
     private var femaleVoices: List<Voice> = emptyList()
@@ -69,6 +76,8 @@ class AndroidSpeechEngine(
         }
     }
 
+    override suspend fun loadVoiceCatalog() = awaitReady()
+
     override fun enqueue(
         request: SpeechRequest,
         queueMode: SpeechQueueMode,
@@ -83,6 +92,8 @@ class AndroidSpeechEngine(
             return
         }
 
+        val requestedVoice = request.proceduralVoiceId
+            ?.let { id -> textToSpeech.voices.orEmpty().firstOrNull { it.name == id } }
         val voicePool = when (request.voiceGroup) {
             VoiceGroup.MALE -> maleVoices
             VoiceGroup.FEMALE -> femaleVoices
@@ -91,8 +102,8 @@ class AndroidSpeechEngine(
             -> offlineVoices
         }.ifEmpty { offlineVoices }
         var selectedVoiceName: String? = null
-        if (voicePool.isNotEmpty()) {
-            val selectedVoice = voicePool[Math.floorMod(request.voiceSlot, voicePool.size)]
+        if (requestedVoice != null || voicePool.isNotEmpty()) {
+            val selectedVoice = requestedVoice ?: voicePool[Math.floorMod(request.voiceSlot, voicePool.size)]
             selectedVoiceName = selectedVoice.name
             if (configuredVoiceName != selectedVoice.name) {
                 textToSpeech.voice = selectedVoice
@@ -166,9 +177,22 @@ class AndroidSpeechEngine(
             .orEmpty()
             .filterNot(Voice::isNetworkConnectionRequired)
             .filterNot { "notInstalled" in it.features }
-            .filter { it.locale.language == Locale.ENGLISH.language }
+            .filter { it.locale.language in supportedLanguages }
             .filterNot { it.name.endsWith("-language") }
-        val preferredVoicePack = available
+        mutableProceduralVoices.value = available.mapNotNull { voice ->
+            val language = when (voice.locale.language) {
+                Locale.ENGLISH.language -> ProceduralVoiceLanguage.ENGLISH
+                UKRAINIAN_LANGUAGE -> ProceduralVoiceLanguage.UKRAINIAN
+                else -> null
+            } ?: return@mapNotNull null
+            ProceduralVoice(
+                id = voice.name,
+                displayName = "${voice.name} (${voice.locale.getDisplayLanguage(Locale.ENGLISH)})",
+                language = language,
+            )
+        }.sortedBy { it.displayName }
+        val englishAvailable = available.filter { it.locale.language == Locale.ENGLISH.language }
+        val preferredVoicePack = englishAvailable
             .groupBy { it.locale }
             .entries
             .sortedWith(
@@ -182,7 +206,7 @@ class AndroidSpeechEngine(
             .firstOrNull()
             ?.value
             .orEmpty()
-            .ifEmpty { available }
+            .ifEmpty { englishAvailable }
         offlineVoices = preferredVoicePack
             .sortedWith(
                 compareBy<Voice>(
@@ -278,6 +302,8 @@ class AndroidSpeechEngine(
 
     private companion object {
         const val TAG = "VoxReaderTTS"
+        const val UKRAINIAN_LANGUAGE = "uk"
+        val supportedLanguages = setOf(Locale.ENGLISH.language, UKRAINIAN_LANGUAGE)
         val maleVoiceMarkers = listOf(
             "x-aub-",
             "x-aud-",

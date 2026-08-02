@@ -22,18 +22,23 @@ object PageCalculator {
         style: TextStyle,
         widthPx: Int,
         heightPx: Int,
+        chapterStarts: List<Int> = emptyList(),
+        paragraphSpacingSp: Float = 0f,
     ): PageLayout {
         if (text.isEmpty() || widthPx <= 0 || heightPx <= 0) return PageLayout(0, 0)
 
-        val start = phraseStartAtOrBefore(anchor.coerceIn(0, text.length), phrases)
-        val remaining = text.length - start
+        val safeAnchor = anchor.coerceIn(0, text.length)
+        val currentChapterStart = chapterStarts.lastOrNull { it <= safeAnchor } ?: 0
+        val start = maxOf(phraseStartAtOrBefore(safeAnchor, phrases), currentChapterStart)
+        val nextChapterStart = chapterStarts.firstOrNull { it > start } ?: text.length
+        val remaining = nextChapterStart - start
         if (remaining <= 0) return PageLayout(text.length, text.length)
 
         val maxFittingLength = largestFittingLength(
             maximum = remaining,
             fits = { length ->
                 fits(
-                    value = text.substring(start, start + length),
+                    value = text.substring(start, start + length).withVisualParagraphSpacing(paragraphSpacingSp),
                     textMeasurer = textMeasurer,
                     style = style,
                     widthPx = widthPx,
@@ -41,7 +46,7 @@ object PageCalculator {
                 )
             },
         )
-        val rawEnd = (start + maxFittingLength.coerceAtLeast(1)).coerceAtMost(text.length)
+        val rawEnd = (start + maxFittingLength.coerceAtLeast(1)).coerceAtMost(nextChapterStart)
         val phraseEnd = PhraseLookup.lastEndingAtOrBefore(phrases, rawEnd)
             ?.takeIf { it.end > start + MINIMUM_SNAPPED_PAGE }
             ?.end
@@ -57,17 +62,20 @@ object PageCalculator {
         style: TextStyle,
         widthPx: Int,
         heightPx: Int,
+        chapterStarts: List<Int> = emptyList(),
+        paragraphSpacingSp: Float = 0f,
     ): PageLayout {
         if (text.isEmpty() || currentStart <= 0) {
-            return forward(text, 0, phrases, textMeasurer, style, widthPx, heightPx)
+            return forward(text, 0, phrases, textMeasurer, style, widthPx, heightPx, chapterStarts, paragraphSpacingSp)
         }
 
         val end = currentStart.coerceIn(0, text.length)
+        val currentChapterStart = chapterStarts.lastOrNull { it < end } ?: 0
         val maxFittingLength = largestFittingLength(
-            maximum = end,
+            maximum = end - currentChapterStart,
             fits = { length ->
                 fits(
-                    value = text.substring(end - length, end),
+                    value = text.substring(end - length, end).withVisualParagraphSpacing(paragraphSpacingSp),
                     textMeasurer = textMeasurer,
                     style = style,
                     widthPx = widthPx,
@@ -147,4 +155,12 @@ object PageCalculator {
 
     private const val INITIAL_PROBE = 512
     private const val MINIMUM_SNAPPED_PAGE = 80
+}
+
+internal fun String.withVisualParagraphSpacing(paragraphSpacingSp: Float): String {
+    val extraBreaks = (paragraphSpacingSp / 8f + 0.5f).toInt().coerceIn(0, 4)
+    val visualBoundary = "\n".repeat(extraBreaks + 1)
+    return replace(Regex("""[\r\n]*\u2766[\r\n]*"""), visualBoundary)
+        .replace(Regex("""[\r\n]+[\s\u00a0]+[\r\n]+"""), visualBoundary)
+        .replace(Regex("""[\r\n]{2,}"""), visualBoundary)
 }

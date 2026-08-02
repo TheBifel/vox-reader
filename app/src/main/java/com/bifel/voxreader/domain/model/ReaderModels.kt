@@ -6,6 +6,25 @@ data class BookDocument(
     val localPath: String,
     val text: String,
     val chapterStarts: List<Int> = listOf(0),
+    val links: List<BookLink> = emptyList(),
+    val headings: List<BookTextRange> = emptyList(),
+    val images: List<BookImage> = emptyList(),
+)
+
+data class BookTextRange(val start: Int, val end: Int)
+
+data class BookLink(
+    val start: Int,
+    val end: Int,
+    val targetOffset: Int? = null,
+    val externalUri: String? = null,
+    val isFootnote: Boolean = false,
+)
+
+data class BookImage(
+    val offset: Int,
+    val archivePath: String,
+    val description: String = "Image",
 )
 
 data class StoredBook(
@@ -34,8 +53,38 @@ data class ReaderSettings(
     val fontSizeSp: Float = 20f,
     val lineHeightSp: Float = 31f,
     val horizontalMarginDp: Float = 24f,
+    val topPaddingDp: Float = 22f,
+    val bottomPaddingDp: Float = 22f,
+    val fontFamily: ReaderFontFamily = ReaderFontFamily.SERIF,
+    val textAlignment: ReaderTextAlignment = ReaderTextAlignment.LEFT,
+    val paragraphSpacingSp: Float = 0f,
+    val firstLineIndentSp: Float = 0f,
+    val orientation: ReaderOrientation = ReaderOrientation.SYSTEM,
+    val keepScreenOn: Boolean = false,
+    val imageSize: ReaderImageSize = ReaderImageSize.FIT_WIDTH,
+    val imageAlignment: ReaderImageAlignment = ReaderImageAlignment.CENTER,
+    val customReaderColors: Boolean = false,
+    val readerBackgroundColor: Int = 0xFF090807.toInt(),
+    val readerTextColor: Int = 0xFFF4E9D6.toInt(),
+    val readerLinkColor: Int = 0xFF78A9FF.toInt(),
+    val readerHeadingColor: Int = 0xFFD8A35D.toInt(),
+    val readerHighlightColor: Int = 0x66D79A47,
+    val sleepCheckMinutes: Int = 5,
+    val sleepGraceSeconds: Int = 30,
+    val readingMode: ReadingMode = ReadingMode.PAGINATED,
     val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
 )
+
+enum class ReaderFontFamily { SERIF, SANS_SERIF, MONOSPACE }
+enum class ReaderTextAlignment { LEFT, CENTER, JUSTIFIED }
+enum class ReaderOrientation { SYSTEM, PORTRAIT, LANDSCAPE }
+enum class ReaderImageSize { ORIGINAL, SMALL, MEDIUM, FIT_WIDTH }
+enum class ReaderImageAlignment { LEFT, CENTER, RIGHT }
+
+enum class ReadingMode {
+    PAGINATED,
+    VERTICAL_SCROLL,
+}
 
 enum class SpeechEngineMode {
     PROCEDURAL,
@@ -68,6 +117,8 @@ data class CharacterProfile(
     val voiceSlot: Int = 0,
     val pitch: Float = 1f,
     val speechRate: Float = 1f,
+    val proceduralVoiceId: String? = null,
+    val localVoicePackId: String? = null,
     val traits: CharacterVoiceTraits? = null,
 )
 

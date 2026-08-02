@@ -3,6 +3,8 @@ package com.bifel.voxreader
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.content.pm.ActivityInfo
+import android.view.WindowManager
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -12,12 +14,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.bifel.voxreader.presentation.reader.ReaderScreen
 import com.bifel.voxreader.presentation.reader.ReaderViewModel
 import com.bifel.voxreader.presentation.theme.VoxReaderTheme
+import com.bifel.voxreader.domain.model.ReaderOrientation
 import java.io.InputStreamReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,30 +32,17 @@ class MainActivity : ComponentActivity() {
     private val viewModel: ReaderViewModel by viewModels {
         val container = (application as VoxReaderApplication).container
         ReaderViewModel.Factory(
-            applicationContext = application.applicationContext,
             importBook = container.importBook,
             loadLatestBook = container.loadLatestBook,
             libraryRepository = container.libraryRepository,
             settingsRepository = container.settingsRepository,
             speechEngine = container.speechEngine,
+            proceduralVoiceCatalog = container.speechEngine,
             generativeSpeechEngine = container.generativeSpeechEngine,
             piperVoicePackManager = container.piperVoicePackManager,
             portableAnalysisService = container.portableAnalysisService,
+            playbackNotificationController = container.playbackNotificationController,
         )
-    }
-
-    private val exportAnalysisLauncher = registerForActivityResult(
-        ActivityResultContracts.CreateDocument("application/json"),
-    ) { uri ->
-        uri ?: return@registerForActivityResult
-        lifecycleScope.launch {
-            runCatching {
-                val content = viewModel.createAnalysisSidecar()
-                withContext(Dispatchers.IO) { writeAnalysisFile(uri, content) }
-            }.onSuccess {
-                viewModel.analysisFileExported()
-            }.onFailure(viewModel::reportAnalysisFileError)
-        }
     }
 
     private val importAnalysisLauncher = registerForActivityResult(
@@ -66,13 +57,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val openBookLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let { viewModel.openBook(it.toString()) } }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        viewModel.initialize(intent.epubUri())
+        viewModel.initialize(intent.bookUri())
 
         setContent {
             val state by viewModel.uiState.collectAsStateWithLifecycle()
+            DisposableEffect(state.orientation, state.keepScreenOn) {
+                requestedOrientation = when (state.orientation) {
+                    ReaderOrientation.SYSTEM -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                    ReaderOrientation.PORTRAIT -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                    ReaderOrientation.LANDSCAPE -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                }
+                if (state.keepScreenOn) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                onDispose { }
+            }
             VoxReaderTheme(darkTheme = state.darkTheme) {
                 Surface(
                     modifier = Modifier.fillMaxSize(),
@@ -90,9 +95,6 @@ class MainActivity : ComponentActivity() {
                         onPreviousPhrase = viewModel::previousPhrase,
                         onNextPhrase = viewModel::nextPhrase,
                         onPageChanged = viewModel::onPageChanged,
-                        onExportAnalysis = {
-                            exportAnalysisLauncher.launch("voxreader-speaker-analysis.json")
-                        },
                         onImportAnalysis = {
                             importAnalysisLauncher.launch(
                                 arrayOf(
@@ -107,13 +109,39 @@ class MainActivity : ComponentActivity() {
                         onDownloadLocalVoice = viewModel::downloadLocalVoice,
                         onRemoveLocalVoice = viewModel::removeLocalVoice,
                         onPreviewLocalVoice = viewModel::previewLocalVoice,
+                        onLoadProceduralVoices = viewModel::loadProceduralVoices,
+                        onPreviewProceduralVoice = viewModel::previewProceduralVoice,
                         onUpdateCharacterVoice = viewModel::updateCharacterVoice,
                         onPreviewCharacterVoice = viewModel::previewCharacterVoice,
                         onSpeakerTapped = viewModel::speakerAt,
                         onSetReadingAppearance = viewModel::setReadingAppearance,
+                        onSetTypography = viewModel::setTypography,
+                        onSetDisplayBehavior = viewModel::setDisplayBehavior,
+                        onSetImageAppearance = viewModel::setImageAppearance,
+                        onSetReaderColors = viewModel::setReaderColors,
+                        onSetSleepTimerSettings = viewModel::setSleepTimerSettings,
+                        onToggleSleepTimer = viewModel::toggleSleepTimer,
+                        onRegisterUserActivity = viewModel::registerUserActivity,
+                        onOpenInternalLink = viewModel::openInternalLink,
+                        onOpenExternalLink = { url ->
+                            runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+                                .onFailure(viewModel::reportAnalysisFileError)
+                        },
+                        onSetReadingMode = viewModel::setReadingMode,
                         onHistoryBack = viewModel::goBackInHistory,
                         onHistoryForward = viewModel::goForwardInHistory,
                         onDismissError = viewModel::dismissError,
+                        onOpenBook = {
+                            openBookLauncher.launch(
+                                arrayOf(
+                                    "application/epub+zip",
+                                    "application/x-epub+zip",
+                                    "application/x-fictionbook+xml",
+                                    "application/fb2+xml",
+                                    "application/octet-stream",
+                                ),
+                            )
+                        },
                     )
                 }
             }
@@ -123,21 +151,11 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        intent.epubUri()?.let(viewModel::openBook)
+        intent.bookUri()?.let(viewModel::openBook)
     }
 
-    private fun Intent?.epubUri(): String? =
+    private fun Intent?.bookUri(): String? =
         this?.dataString?.takeIf { action == Intent.ACTION_VIEW }
-
-    private fun writeAnalysisFile(
-        uri: Uri,
-        content: String,
-    ) {
-        val stream = requireNotNull(contentResolver.openOutputStream(uri, "wt")) {
-            "The selected analysis file cannot be opened for writing."
-        }
-        stream.bufferedWriter(Charsets.UTF_8).use { it.write(content) }
-    }
 
     private fun readAnalysisFile(uri: Uri): String {
         val stream = requireNotNull(contentResolver.openInputStream(uri)) {

@@ -1,8 +1,6 @@
 package com.bifel.voxreader.presentation.reader
 
 import android.util.Log
-import android.content.Context
-import com.bifel.voxreader.data.speech.MediaPlaybackService
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -13,6 +11,14 @@ import com.bifel.voxreader.domain.model.UNKNOWN_SPEAKER_ID
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.StoredBook
 import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.domain.model.ReadingMode
+import com.bifel.voxreader.domain.model.ReaderFontFamily
+import com.bifel.voxreader.domain.model.ReaderTextAlignment
+import com.bifel.voxreader.domain.model.ReaderOrientation
+import com.bifel.voxreader.domain.model.ReaderImageSize
+import com.bifel.voxreader.domain.model.ReaderImageAlignment
+import com.bifel.voxreader.domain.model.VoiceGroup
+import com.bifel.voxreader.domain.reader.ReadingHistory
 import com.bifel.voxreader.domain.repository.LibraryRepository
 import com.bifel.voxreader.domain.repository.SettingsRepository
 import com.bifel.voxreader.domain.speech.EmotionDelivery
@@ -22,7 +28,12 @@ import com.bifel.voxreader.domain.speech.SpeechEngine
 import com.bifel.voxreader.domain.speech.SpeechEvent
 import com.bifel.voxreader.domain.speech.SpeechQueueMode
 import com.bifel.voxreader.domain.speech.SpeechRequest
+import com.bifel.voxreader.domain.speech.PlaybackCommand
+import com.bifel.voxreader.domain.speech.PlaybackNotificationController
+import com.bifel.voxreader.domain.speech.ProceduralVoiceCatalog
+import com.bifel.voxreader.domain.speech.ProceduralVoiceLanguage
 import com.bifel.voxreader.data.speech.PiperVoicePackManager
+import com.bifel.voxreader.data.speech.VoicePackLanguage
 import com.bifel.voxreader.domain.speech.SpeechText
 import com.bifel.voxreader.domain.text.SentenceSegmenter
 import com.bifel.voxreader.domain.usecase.ImportBookUseCase
@@ -31,23 +42,26 @@ import com.bifel.voxreader.data.preanalysis.PortableAnalysisService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class ReaderViewModel(
-    private val applicationContext: Context,
     private val importBook: ImportBookUseCase,
     private val loadLatestBook: LoadLatestBookUseCase,
     private val libraryRepository: LibraryRepository,
     private val settingsRepository: SettingsRepository,
     private val speechEngine: SpeechEngine,
+    private val proceduralVoiceCatalog: ProceduralVoiceCatalog,
     private val generativeSpeechEngine: SpeechEngine,
     private val piperVoicePackManager: PiperVoicePackManager,
     private val portableAnalysisService: PortableAnalysisService,
+    private val playbackNotificationController: PlaybackNotificationController,
 ) : ViewModel() {
 
     private val mutableUiState = MutableStateFlow(ReaderUiState())
@@ -57,11 +71,11 @@ class ReaderViewModel(
     private var storedBook: StoredBook? = null
     private var currentUtteranceId: String? = null
     private var speechQueueJob: Job? = null
+    private var sleepTimerJob: Job? = null
     private val speechBuffer = PhrasePlaybackBuffer(SPEECH_LOOK_AHEAD_PHRASES)
     private val recentPhraseCache = ArrayDeque<Int>()
     private var playbackSession = 0L
-    private val backHistory = ArrayDeque<Int>()
-    private val forwardHistory = ArrayDeque<Int>()
+    private val readingHistory = ReadingHistory(MAX_HISTORY_ENTRIES)
 
     init {
         viewModelScope.launch {
@@ -74,6 +88,25 @@ class ReaderViewModel(
                         fontSizeSp = settings.fontSizeSp,
                         lineHeightSp = settings.lineHeightSp,
                         horizontalMarginDp = settings.horizontalMarginDp,
+                        topPaddingDp = settings.topPaddingDp,
+                        bottomPaddingDp = settings.bottomPaddingDp,
+                        fontFamily = settings.fontFamily,
+                        textAlignment = settings.textAlignment,
+                        paragraphSpacingSp = settings.paragraphSpacingSp,
+                        firstLineIndentSp = settings.firstLineIndentSp,
+                        orientation = settings.orientation,
+                        keepScreenOn = settings.keepScreenOn,
+                        imageSize = settings.imageSize,
+                        imageAlignment = settings.imageAlignment,
+                        customReaderColors = settings.customReaderColors,
+                        readerBackgroundColor = settings.readerBackgroundColor,
+                        readerTextColor = settings.readerTextColor,
+                        readerLinkColor = settings.readerLinkColor,
+                        readerHeadingColor = settings.readerHeadingColor,
+                        readerHighlightColor = settings.readerHighlightColor,
+                        sleepCheckMinutes = settings.sleepCheckMinutes,
+                        sleepGraceSeconds = settings.sleepGraceSeconds,
+                        readingMode = settings.readingMode,
                         speechEngineMode = settings.speechEngineMode,
                         playbackState = when {
                             !settings.speechControlsEnabled -> PlaybackState.DISABLED
@@ -86,6 +119,11 @@ class ReaderViewModel(
         }
         viewModelScope.launch {
             speechEngine.events.collect(::handleSpeechEvent)
+        }
+        viewModelScope.launch {
+            proceduralVoiceCatalog.proceduralVoices.collect { voices ->
+                mutableUiState.update { it.copy(proceduralVoices = voices) }
+            }
         }
         viewModelScope.launch {
             generativeSpeechEngine.events.collect(::handleSpeechEvent)
@@ -101,12 +139,12 @@ class ReaderViewModel(
             }
         }
         viewModelScope.launch {
-            MediaPlaybackService.commands.collect { command ->
+            playbackNotificationController.commands.collect { command ->
                 when (command) {
-                    MediaPlaybackService.Command.Play -> playOrPause()
-                    MediaPlaybackService.Command.Pause -> pause()
-                    MediaPlaybackService.Command.Next -> nextPhrase()
-                    MediaPlaybackService.Command.Previous -> previousPhrase()
+                    PlaybackCommand.PLAY -> playOrPause()
+                    PlaybackCommand.PAUSE -> pause()
+                    PlaybackCommand.NEXT -> nextPhrase()
+                    PlaybackCommand.PREVIOUS -> previousPhrase()
                 }
             }
         }
@@ -131,6 +169,7 @@ class ReaderViewModel(
         viewModelScope.launch {
             runCatching {
                 val document = importBook(sourceUri)
+                portableAnalysisService.clearBook(document.id)
                 val saved = libraryRepository.currentLibrary()
                     .books
                     .first { it.id == document.id }
@@ -161,7 +200,7 @@ class ReaderViewModel(
 
     fun disableSpeechControls() {
         stopPlayback(clearSelection = false)
-        MediaPlaybackService.stop(applicationContext)
+        playbackNotificationController.stop()
         viewModelScope.launch {
             settingsRepository.setSpeechControlsEnabled(false)
         }
@@ -181,10 +220,50 @@ class ReaderViewModel(
         restartIndex?.let(::preparePhraseAndPlay)
     }
 
-    fun setReadingAppearance(fontSizeSp: Float, lineHeightSp: Float, horizontalMarginDp: Float) {
+    fun setReadingAppearance(fontSizeSp: Float, lineHeightSp: Float, horizontalMarginDp: Float, topPaddingDp: Float, bottomPaddingDp: Float) {
         viewModelScope.launch {
-            settingsRepository.setReadingAppearance(fontSizeSp, lineHeightSp, horizontalMarginDp)
+            settingsRepository.setReadingAppearance(fontSizeSp, lineHeightSp, horizontalMarginDp, topPaddingDp, bottomPaddingDp)
         }
+    }
+
+    fun setReadingMode(mode: ReadingMode) {
+        viewModelScope.launch { settingsRepository.setReadingMode(mode) }
+    }
+
+    fun setTypography(fontFamily: ReaderFontFamily, alignment: ReaderTextAlignment, paragraphSpacingSp: Float, firstLineIndentSp: Float) {
+        viewModelScope.launch { settingsRepository.setTypography(fontFamily, alignment, paragraphSpacingSp, firstLineIndentSp) }
+    }
+
+    fun setDisplayBehavior(orientation: ReaderOrientation, keepScreenOn: Boolean) {
+        viewModelScope.launch { settingsRepository.setDisplayBehavior(orientation, keepScreenOn) }
+    }
+
+    fun setImageAppearance(size: ReaderImageSize, alignment: ReaderImageAlignment) {
+        viewModelScope.launch { settingsRepository.setImageAppearance(size, alignment) }
+    }
+
+    fun setReaderColors(enabled: Boolean, background: Int, text: Int, link: Int, heading: Int, highlight: Int) {
+        viewModelScope.launch { settingsRepository.setReaderColors(enabled, background, text, link, heading, highlight) }
+    }
+
+    fun setSleepTimerSettings(checkMinutes: Int, graceSeconds: Int) {
+        viewModelScope.launch { settingsRepository.setSleepTimerSettings(checkMinutes, graceSeconds) }
+        if (mutableUiState.value.sleepTimerEnabled) restartSleepTimer()
+    }
+
+    fun toggleSleepTimer() {
+        val enabled = !mutableUiState.value.sleepTimerEnabled
+        mutableUiState.update { it.copy(sleepTimerEnabled = enabled, sleepTimerWarning = false) }
+        if (enabled) restartSleepTimer() else sleepTimerJob?.cancel()
+    }
+
+    fun registerUserActivity() {
+        if (mutableUiState.value.sleepTimerEnabled) restartSleepTimer()
+    }
+
+    fun openInternalLink(targetOffset: Int) {
+        val book = mutableUiState.value.book ?: return
+        onPageChanged(targetOffset.coerceIn(0, book.text.length), targetOffset.coerceIn(0, book.text.length), true)
     }
 
     fun setSpeechEngineMode(mode: SpeechEngineMode) {
@@ -216,11 +295,16 @@ class ReaderViewModel(
                 generativeSpeechEngine.enqueue(
                     SpeechRequest(
                         utteranceId = "model-preview:${pack.id}:${System.nanoTime()}",
-                        text = "Hello, this is how ${pack.displayName} sounds.",
+                        text = if (pack.language == VoicePackLanguage.UKRAINIAN) {
+                            "Привіт, це україномовна модель ${pack.displayName}."
+                        } else {
+                            "Hello, this is how ${pack.displayName} sounds."
+                        },
                         voiceSlot = voiceSlot,
                         voiceGroup = pack.voiceGroup,
                         pitch = 1f,
                         speechRate = 1f,
+                        localVoicePackId = pack.id,
                     ),
                     SpeechQueueMode.FLUSH,
                 )
@@ -243,7 +327,6 @@ class ReaderViewModel(
         mutableUiState.update { it.copy(characters = updatedCharacters) }
         viewModelScope.launch {
             libraryRepository.updateVoiceOverride(book.id, profile)
-            portableAnalysisService.updateVoiceProfile(book.id, profile)
         }
     }
 
@@ -261,9 +344,41 @@ class ReaderViewModel(
                         utteranceId = "voice-preview:${profile.id}:${System.nanoTime()}",
                         text = "Hello. This is how ${profile.displayName}'s voice sounds.",
                         voiceSlot = profile.voiceSlot,
-                        voiceGroup = profile.voiceGroup,
-                        pitch = profile.pitch,
-                        speechRate = profile.speechRate,
+                voiceGroup = profile.voiceGroup,
+                pitch = profile.pitch,
+                speechRate = profile.speechRate,
+                proceduralVoiceId = profile.proceduralVoiceId,
+                localVoicePackId = profile.localVoicePackId,
+                    ),
+                    SpeechQueueMode.FLUSH,
+                )
+            }.onFailure(::showError)
+        }
+    }
+
+    fun loadProceduralVoices() {
+        viewModelScope.launch { runCatching { proceduralVoiceCatalog.loadVoiceCatalog() }.onFailure(::showError) }
+    }
+
+    fun previewProceduralVoice(id: String) {
+        val voice = mutableUiState.value.proceduralVoices.firstOrNull { it.id == id } ?: return
+        resetSpeechPipeline()
+        viewModelScope.launch {
+            runCatching {
+                speechEngine.awaitReady()
+                speechEngine.enqueue(
+                    SpeechRequest(
+                        utteranceId = "procedural-preview:${voice.id}:${System.nanoTime()}",
+                        text = if (voice.language == ProceduralVoiceLanguage.UKRAINIAN) {
+                            "Привіт, це україномовний системний голос ${voice.displayName}."
+                        } else {
+                            "Hello, this is how ${voice.displayName} sounds."
+                        },
+                        voiceSlot = 0,
+                        voiceGroup = VoiceGroup.NEUTRAL,
+                        pitch = 1f,
+                        speechRate = 1f,
+                        proceduralVoiceId = voice.id,
                     ),
                     SpeechQueueMode.FLUSH,
                 )
@@ -299,9 +414,7 @@ class ReaderViewModel(
         val safeStart = start.coerceIn(0, book.text.length)
         val safeEnd = end.coerceIn(safeStart, book.text.length)
         if (userInitiated && safeStart != mutableUiState.value.pageStart) {
-            backHistory.addLast(mutableUiState.value.pageStart)
-            if (backHistory.size > MAX_HISTORY_ENTRIES) backHistory.removeFirst()
-            forwardHistory.clear()
+            readingHistory.recordJump(mutableUiState.value.pageStart, safeStart)
         }
         if (userInitiated) {
             if (mutableUiState.value.playbackState == PlaybackState.PLAYING ||
@@ -324,9 +437,13 @@ class ReaderViewModel(
         }
     }
 
-    fun goBackInHistory() = navigateHistory(backHistory, forwardHistory)
+    fun goBackInHistory() = readingHistory.goBack(mutableUiState.value.pageStart)?.let {
+        onPageChanged(it, it, false)
+    }
 
-    fun goForwardInHistory() = navigateHistory(forwardHistory, backHistory)
+    fun goForwardInHistory() = readingHistory.goForward(mutableUiState.value.pageStart)?.let {
+        onPageChanged(it, it, false)
+    }
 
     fun speakerAt(offset: Int): String? {
         val state = mutableUiState.value
@@ -339,23 +456,8 @@ class ReaderViewModel(
             }
     }
 
-    private fun navigateHistory(from: ArrayDeque<Int>, to: ArrayDeque<Int>) {
-        val target = from.removeLastOrNull() ?: return
-        val current = mutableUiState.value.pageStart
-        to.addLast(current)
-        onPageChanged(target, target, false)
-    }
-
     fun dismissError() {
         mutableUiState.update { it.copy(errorMessage = null) }
-    }
-
-    suspend fun createAnalysisSidecar(): String {
-        val state = mutableUiState.value
-        val book = requireNotNull(state.book) { "Open a book before exporting analysis." }
-        return withContext(Dispatchers.Default) {
-            portableAnalysisService.export(book, state.phrases)
-        }
     }
 
     fun importAnalysisSidecar(content: String) {
@@ -370,9 +472,6 @@ class ReaderViewModel(
             runCatching {
                 withContext(Dispatchers.Default) {
                     val result = portableAnalysisService.import(book, content)
-                    storedBook?.voiceOverrides.orEmpty().forEach { override ->
-                        portableAnalysisService.updateVoiceProfile(book.id, override)
-                    }
                     val cached = portableAnalysisService.cached(book) {
                         SentenceSegmenter.segment(book.text)
                     }
@@ -410,12 +509,6 @@ class ReaderViewModel(
         }
     }
 
-    fun analysisFileExported() {
-        mutableUiState.update {
-            it.copy(analysisMessage = "Analysis JSON exported. Process it externally, then import it.")
-        }
-    }
-
     fun reportAnalysisFileError(error: Throwable) {
         showError(error)
     }
@@ -440,21 +533,13 @@ class ReaderViewModel(
         stored: StoredBook,
     ) {
         storedBook = stored
-        val cached = withContext(Dispatchers.Default) {
-            portableAnalysisService.cached(document) {
-                SentenceSegmenter.segment(document.text)
-            }
-        }
-        val phrases = cached.phrases
-        val baseCharacters = cached.characters.ifEmpty { listOf(NarratorProfile) }
-        val characters = applyVoiceOverrides(baseCharacters, stored.voiceOverrides)
         val restoredPosition = stored.readingPosition.coerceIn(0, document.text.length)
         mutableUiState.update { current ->
             current.copy(
                 isLoading = false,
                 book = document,
-                phrases = phrases,
-                characters = characters,
+                phrases = emptyList(),
+                characters = applyVoiceOverrides(listOf(NarratorProfile), stored.voiceOverrides),
                 pageStart = restoredPosition,
                 pageEnd = stored.pageEndPosition.coerceIn(restoredPosition, document.text.length),
                 playbackState = if (current.speechControlsEnabled) {
@@ -465,14 +550,33 @@ class ReaderViewModel(
                 activePhraseIndex = null,
                 highlightStart = null,
                 highlightEnd = null,
+                cachedSpeakerPhraseIndices = emptySet(),
+                phraseEmotions = emptyMap(),
+                cachedAttributionProvider = null,
+                cachedAttributionCoverage = 0f,
+                analysisMessage = "Preparing speech phrases in the background…",
+                errorMessage = null,
+            )
+        }
+        val cached = withContext(Dispatchers.Default) {
+            portableAnalysisService.cached(document) { SentenceSegmenter.segment(document.text) }
+        }
+        if (mutableUiState.value.book?.id != document.id) return
+        val characters = applyVoiceOverrides(
+            cached.characters.ifEmpty { listOf(NarratorProfile) },
+            stored.voiceOverrides,
+        )
+        mutableUiState.update {
+            it.copy(
+                phrases = cached.phrases,
+                characters = characters,
                 cachedSpeakerPhraseIndices = cached.cachedPhraseIndices,
                 phraseEmotions = cached.emotionsByPhraseIndex,
                 cachedAttributionProvider = cached.providerId,
                 cachedAttributionCoverage = cached.coverage,
-                analysisMessage = cached.providerId?.let {
-                    "Using cached speaker analysis from $it."
+                analysisMessage = cached.providerId?.let { provider ->
+                    "Using cached speaker analysis from $provider."
                 },
-                errorMessage = null,
             )
         }
     }
@@ -480,7 +584,17 @@ class ReaderViewModel(
     private fun prepareAndPlay() {
         val state = mutableUiState.value
         state.book ?: return
-        if (state.phrases.isEmpty()) return
+        if (state.phrases.isEmpty()) {
+            if (speechQueueJob?.isActive == true) return
+            val bookId = state.book.id
+            mutableUiState.update { it.copy(playbackState = PlaybackState.PREPARING) }
+            speechQueueJob = viewModelScope.launch {
+                uiState.first { it.book?.id != bookId || it.phrases.isNotEmpty() }
+                speechQueueJob = null
+                if (mutableUiState.value.book?.id == bookId) prepareAndPlay()
+            }
+            return
+        }
         if (
             state.speechEngineMode == SpeechEngineMode.LOCAL_GENERATIVE &&
             piperVoicePackManager.installedPacks().isEmpty()
@@ -508,7 +622,7 @@ class ReaderViewModel(
                 },
             )
         }
-        mutableUiState.value.book?.let { MediaPlaybackService.update(applicationContext, it.title, false) }
+        mutableUiState.value.book?.let { playbackNotificationController.update(it.title, false) }
     }
 
     private fun movePhrase(delta: Int) {
@@ -564,7 +678,8 @@ class ReaderViewModel(
                 playbackState = PlaybackState.PREPARING,
             )
         }
-        state.book?.let { MediaPlaybackService.update(applicationContext, it.title, true) }
+        playbackNotificationController.update(state.book.title, true)
+        if (state.sleepTimerEnabled && sleepTimerJob?.isActive != true) restartSleepTimer()
         speechQueueJob = viewModelScope.launch {
             runCatching {
                 activeSpeechEngine().awaitReady()
@@ -619,8 +734,13 @@ class ReaderViewModel(
     ) {
         val state = mutableUiState.value
         val phrase = state.phrases.getOrNull(index) ?: return
-        val profile = state.characters.firstOrNull { it.id == phrase.speakerId }
-            ?: NarratorProfile
+        // Without an imported character map, the book has no trusted speaker assignments.
+        // Keep voice mode deterministic and use the configured narrator for every phrase.
+        val profile = if (state.cachedAttributionProvider == null) {
+            state.characters.firstOrNull { it.id == NarratorProfile.id } ?: NarratorProfile
+        } else {
+            state.characters.firstOrNull { it.id == phrase.speakerId } ?: NarratorProfile
+        }
         val emotion = state.phraseEmotions[phrase.index]
         val delivery = EmotionDelivery.from(emotion)
         val pitch = (profile.pitch * delivery.pitchMultiplier).coerceIn(0.5f, 1.6f)
@@ -652,6 +772,7 @@ class ReaderViewModel(
                 voiceGroup = profile.voiceGroup,
                 pitch = pitch,
                 speechRate = speechRate,
+                proceduralVoiceId = profile.proceduralVoiceId,
                 pauseAfterMillis = delivery.pauseAfterMillis,
             ),
             queueMode = queueMode,
@@ -787,6 +908,23 @@ class ReaderViewModel(
         }
     }
 
+    private fun restartSleepTimer() {
+        sleepTimerJob?.cancel()
+        mutableUiState.update { it.copy(sleepTimerWarning = false) }
+        val state = mutableUiState.value
+        if (!state.sleepTimerEnabled) return
+        sleepTimerJob = viewModelScope.launch {
+            delay(state.sleepCheckMinutes * 60_000L)
+            if (!mutableUiState.value.sleepTimerEnabled) return@launch
+            mutableUiState.update { it.copy(sleepTimerWarning = true) }
+            delay(mutableUiState.value.sleepGraceSeconds * 1_000L)
+            if (mutableUiState.value.sleepTimerEnabled && mutableUiState.value.sleepTimerWarning) {
+                pause()
+                mutableUiState.update { it.copy(sleepTimerEnabled = false, sleepTimerWarning = false) }
+            }
+        }
+    }
+
     private fun resetSpeechPipeline() {
         playbackSession++
         speechQueueJob?.cancel()
@@ -848,6 +986,7 @@ class ReaderViewModel(
                 voiceSlot = override.voiceSlot,
                 pitch = override.pitch,
                 speechRate = override.speechRate,
+                localVoicePackId = override.localVoicePackId,
             )
         }
     }
@@ -860,28 +999,30 @@ class ReaderViewModel(
     }
 
     class Factory(
-        private val applicationContext: Context,
         private val importBook: ImportBookUseCase,
         private val loadLatestBook: LoadLatestBookUseCase,
         private val libraryRepository: LibraryRepository,
         private val settingsRepository: SettingsRepository,
         private val speechEngine: SpeechEngine,
+        private val proceduralVoiceCatalog: ProceduralVoiceCatalog,
         private val generativeSpeechEngine: SpeechEngine,
         private val piperVoicePackManager: PiperVoicePackManager,
         private val portableAnalysisService: PortableAnalysisService,
+        private val playbackNotificationController: PlaybackNotificationController,
     ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T =
             ReaderViewModel(
-                applicationContext = applicationContext,
                 importBook = importBook,
                 loadLatestBook = loadLatestBook,
                 libraryRepository = libraryRepository,
                 settingsRepository = settingsRepository,
                 speechEngine = speechEngine,
+                proceduralVoiceCatalog = proceduralVoiceCatalog,
                 generativeSpeechEngine = generativeSpeechEngine,
                 piperVoicePackManager = piperVoicePackManager,
                 portableAnalysisService = portableAnalysisService,
+                playbackNotificationController = playbackNotificationController,
             ) as T
     }
 }

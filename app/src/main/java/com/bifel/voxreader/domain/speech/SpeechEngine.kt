@@ -2,6 +2,21 @@ package com.bifel.voxreader.domain.speech
 
 import com.bifel.voxreader.domain.model.VoiceGroup
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+
+data class ProceduralVoice(
+    val id: String,
+    val displayName: String,
+    val language: ProceduralVoiceLanguage,
+)
+
+enum class ProceduralVoiceLanguage { ENGLISH, UKRAINIAN }
+
+interface ProceduralVoiceCatalog {
+    val proceduralVoices: StateFlow<List<ProceduralVoice>>
+
+    suspend fun loadVoiceCatalog()
+}
 
 data class SpeechRequest(
     val utteranceId: String,
@@ -10,6 +25,8 @@ data class SpeechRequest(
     val voiceGroup: VoiceGroup,
     val pitch: Float,
     val speechRate: Float,
+    val proceduralVoiceId: String? = null,
+    val localVoicePackId: String? = null,
     val pauseAfterMillis: Long = 0L,
 )
 

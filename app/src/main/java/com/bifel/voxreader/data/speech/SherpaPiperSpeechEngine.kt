@@ -126,11 +126,14 @@ class SherpaPiperSpeechEngine(
         activeRequest = queued
         activeStarted = false
         val audio = runCatching {
-            engineFor(voiceFor(request)).generateWithConfigAndCallback(
+            voiceFor(request).let { pack -> engineFor(pack).generateWithConfigAndCallback(
                 text = request.text,
-                config = GenerationConfig(speed = request.speechRate.coerceIn(0.5f, 2f)),
+                config = GenerationConfig(
+                    speed = request.speechRate.coerceIn(0.5f, 2f),
+                    sid = pack.speakerId,
+                ),
                 callback = this::onGeneratedSamples,
-            )
+            ) }
         }.getOrElse { error ->
             eventsFlow.tryEmit(SpeechEvent.Error(request.utteranceId, error.message ?: "AI speech generation failed."))
             return
@@ -173,7 +176,7 @@ class SherpaPiperSpeechEngine(
         return destination
     }
 
-    private fun engineFor(pack: PiperVoicePack): OfflineTts = engines.getOrPut(pack.id) {
+    private fun engineFor(pack: PiperVoicePack): OfflineTts = engines.getOrPut(pack.storageId) {
         val espeakDataDirectory = copyEspeakData()
         val tokens = copyTokens()
         OfflineTts(
@@ -202,6 +205,9 @@ class SherpaPiperSpeechEngine(
     private fun voiceFor(request: SpeechRequest): PiperVoicePack {
         val installed = voicePacks.installedPacks()
         check(installed.isNotEmpty()) { "Download at least one Local AI voice first." }
+        request.localVoicePackId?.let { id ->
+            installed.firstOrNull { it.id == id }?.let { return it }
+        }
         val matchingGroup = installed.filter { it.voiceGroup == request.voiceGroup }
         val candidates = matchingGroup.ifEmpty {
             if (request.voiceGroup.name == "NARRATOR") {

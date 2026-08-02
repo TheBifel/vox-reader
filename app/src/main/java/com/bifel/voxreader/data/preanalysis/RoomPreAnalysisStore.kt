@@ -40,6 +40,13 @@ class RoomPreAnalysisStore(
     private val attributionDao = database.phraseAttributionDao()
     private val characterDao = database.characterDao()
 
+    suspend fun clearBook(bookId: String) {
+        database.withTransaction {
+            runDao.deactivateBook(bookId, clock())
+            manifestDao.deleteForBook(bookId)
+        }
+    }
+
     suspend fun createRun(
         bookId: String,
         providerId: String,
@@ -95,6 +102,13 @@ class RoomPreAnalysisStore(
 
     suspend fun manifest(bookId: String): List<PhraseManifestItem> =
         manifestDao.forBook(bookId).map { it.toDomain() }
+
+    suspend fun replaceManifest(bookId: String, manifest: List<PhraseManifestItem>) {
+        database.withTransaction {
+            manifestDao.deleteForBook(bookId)
+            manifestDao.upsert(manifest.map { it.toEntity(bookId) })
+        }
+    }
 
     suspend fun activeAttributions(bookId: String): Map<PhraseId, SpeakerAttribution> =
         attributionDao.activeForBook(bookId).associate { entity ->

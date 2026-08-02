@@ -22,7 +22,7 @@ class PiperVoicePackManager(context: Context) {
     suspend fun download(id: String) = withContext(Dispatchers.IO) {
         val pack = catalog.firstOrNull { it.id == id } ?: return@withContext
         update(pack.copy(downloadState = VoicePackDownloadState.DOWNLOADING))
-        val directory = File(root, pack.id)
+        val directory = directoryFor(pack)
         val temporaryModel = File(directory, "model.onnx.part")
         val temporaryConfig = File(directory, "model.onnx.json.part")
         try {
@@ -63,7 +63,7 @@ class PiperVoicePackManager(context: Context) {
 
     suspend fun remove(id: String) = withContext(Dispatchers.IO) {
         val pack = catalog.firstOrNull { it.id == id } ?: return@withContext
-        val directory = File(root, pack.id)
+        val directory = directoryFor(pack)
         check(directory.parentFile?.canonicalFile == root.canonicalFile) { "Invalid voice-pack directory." }
         File(directory, "model.onnx").delete()
         File(directory, "model.onnx.json").delete()
@@ -77,7 +77,7 @@ class PiperVoicePackManager(context: Context) {
     private fun loadPacks(): List<PiperVoicePack> = catalog.map { pack ->
         pack.copy(downloadState = if (
             modelFile(pack).isFile && configFile(pack).isFile &&
-            File(File(root, pack.id), FORMAT_MARKER).readTextOrNull() == FORMAT_VERSION
+            File(directoryFor(pack), FORMAT_MARKER).readTextOrNull() == FORMAT_VERSION
         ) {
             VoicePackDownloadState.INSTALLED
         } else {
@@ -86,11 +86,21 @@ class PiperVoicePackManager(context: Context) {
     }
 
     private fun update(pack: PiperVoicePack) {
-        mutablePacks.value = mutablePacks.value.map { if (it.id == pack.id) pack else it }
+        mutablePacks.value = mutablePacks.value.map { current ->
+            if (current.storageId == pack.storageId) {
+                current.copy(
+                    downloadState = pack.downloadState,
+                    installedSizeBytes = pack.installedSizeBytes,
+                    downloadProgress = pack.downloadProgress,
+                    error = pack.error,
+                )
+            } else current
+        }
     }
 
-    private fun modelFile(pack: PiperVoicePack) = File(File(root, pack.id), "model.onnx")
-    private fun configFile(pack: PiperVoicePack) = File(File(root, pack.id), "model.onnx.json")
+    private fun directoryFor(pack: PiperVoicePack) = File(root, pack.storageId)
+    private fun modelFile(pack: PiperVoicePack) = File(directoryFor(pack), "model.onnx")
+    private fun configFile(pack: PiperVoicePack) = File(directoryFor(pack), "model.onnx.json")
     private fun installedSize(pack: PiperVoicePack): Long? =
         if (modelFile(pack).isFile && configFile(pack).isFile) {
             modelFile(pack).length() + configFile(pack).length()
@@ -133,6 +143,45 @@ class PiperVoicePackManager(context: Context) {
         // Sherpa-converted Piper models. Raw Piper models are not binary compatible with
         // Sherpa's Android runtime and can make its native layer terminate the process.
         val catalog = listOf(
+            // Ukrainian models currently available in the Sherpa-compatible conversion catalog.
+            pack(
+                id = "uk-lada-low",
+                name = "Lada (Ukrainian, x-low)",
+                group = VoiceGroup.FEMALE,
+                repository = "vits-piper-uk_UA-lada-x_low",
+                fileName = "uk_UA-lada-x_low.onnx",
+                language = VoicePackLanguage.UKRAINIAN,
+            ),
+            pack(
+                id = "uk-ukrainian-tts-lada",
+                name = "Lada (Ukrainian, medium)",
+                group = VoiceGroup.FEMALE,
+                repository = "vits-piper-uk_UA-ukrainian_tts-medium",
+                fileName = "uk_UA-ukrainian_tts-medium.onnx",
+                language = VoicePackLanguage.UKRAINIAN,
+                storageId = "uk-ukrainian-tts-medium",
+                speakerId = 0,
+            ),
+            pack(
+                id = "uk-ukrainian-tts-mykyta",
+                name = "Mykyta (Ukrainian, medium)",
+                group = VoiceGroup.MALE,
+                repository = "vits-piper-uk_UA-ukrainian_tts-medium",
+                fileName = "uk_UA-ukrainian_tts-medium.onnx",
+                language = VoicePackLanguage.UKRAINIAN,
+                storageId = "uk-ukrainian-tts-medium",
+                speakerId = 1,
+            ),
+            pack(
+                id = "uk-ukrainian-tts-tetiana",
+                name = "Tetiana (Ukrainian, medium)",
+                group = VoiceGroup.FEMALE,
+                repository = "vits-piper-uk_UA-ukrainian_tts-medium",
+                fileName = "uk_UA-ukrainian_tts-medium.onnx",
+                language = VoicePackLanguage.UKRAINIAN,
+                storageId = "uk-ukrainian-tts-medium",
+                speakerId = 2,
+            ),
             // United States English
             pack("amy", "Amy (US, low)", VoiceGroup.FEMALE, "vits-piper-en_US-amy-low", "en_US-amy-low.onnx"),
             pack("us-amy-medium", "Amy (US, medium)", VoiceGroup.FEMALE, "vits-piper-en_US-amy-medium", "en_US-amy-medium.onnx"),
@@ -184,12 +233,23 @@ class PiperVoicePackManager(context: Context) {
         private const val FORMAT_MARKER = ".voxreader-pack-format"
         private const val FORMAT_VERSION = "sherpa-piper-v1"
 
-        private fun pack(id: String, name: String, group: VoiceGroup, repository: String, fileName: String): PiperVoicePack {
+        private fun pack(
+            id: String,
+            name: String,
+            group: VoiceGroup,
+            repository: String,
+            fileName: String,
+            language: VoicePackLanguage = VoicePackLanguage.ENGLISH,
+            storageId: String = id,
+            speakerId: Int = 0,
+        ): PiperVoicePack {
             val base = "https://huggingface.co/csukuangfj/$repository/resolve/main/$fileName"
-            return PiperVoicePack(id, name, voiceDescription(name, group), group, base, "$base.json")
+            return PiperVoicePack(id, name, voiceDescription(name, group), group, language, base, "$base.json", storageId, speakerId)
         }
 
         private fun voiceDescription(name: String, group: VoiceGroup): String = when {
+            "ukrainian, medium" in name.lowercase() ->
+                "One shared download with three Ukrainian speakers; choose this speaker for a character."
             "glados" in name.lowercase() -> "Synthetic, robotic voice for unusual characters."
             "24 voices" in name.lowercase() || "109 voices" in name.lowercase() || "904 voices" in name.lowercase() ->
                 "Multi-speaker collection for experimenting with varied supporting roles."
@@ -210,8 +270,13 @@ data class PiperVoicePack(
     val displayName: String,
     val description: String,
     val voiceGroup: VoiceGroup,
+    val language: VoicePackLanguage = VoicePackLanguage.ENGLISH,
     val modelUrl: String,
     val configUrl: String,
+    /** Variants may share one downloaded model directory. */
+    val storageId: String = id,
+    /** Speaker index inside a multi-speaker model. */
+    val speakerId: Int = 0,
     val downloadState: VoicePackDownloadState = VoicePackDownloadState.NOT_INSTALLED,
     val installedSizeBytes: Long? = null,
     val downloadProgress: Float? = null,
@@ -221,3 +286,5 @@ data class PiperVoicePack(
 }
 
 enum class VoicePackDownloadState { NOT_INSTALLED, DOWNLOADING, INSTALLED, FAILED }
+
+enum class VoicePackLanguage { ENGLISH, UKRAINIAN }
