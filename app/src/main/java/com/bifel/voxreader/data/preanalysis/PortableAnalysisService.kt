@@ -11,6 +11,9 @@ import com.bifel.voxreader.domain.preanalysis.PhraseManifestBuilder
 import com.bifel.voxreader.domain.preanalysis.model.PhraseManifestItem
 import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarJson
 import kotlinx.coroutines.flow.first
+import com.bifel.voxreader.domain.repository.ActiveSpeakerAnalysis
+import com.bifel.voxreader.domain.repository.AnalysisImportResult
+import com.bifel.voxreader.domain.repository.SpeakerAnalysisRepository
 
 /**
  * The application boundary shared by every external sidecar producer. Each producer ultimately
@@ -18,14 +21,14 @@ import kotlinx.coroutines.flow.first
  */
 class PortableAnalysisService(
     private val store: RoomPreAnalysisStore,
-) {
+) : SpeakerAnalysisRepository {
 
-    suspend fun clearBook(bookId: String) = store.clearBook(bookId)
+    override suspend fun clearBook(bookId: String) = store.clearBook(bookId)
 
-    suspend fun import(
+    override suspend fun import(
         book: BookDocument,
         content: String,
-    ): ImportedAnalysis {
+    ): AnalysisImportResult {
         val bundle = AnalysisSidecarJson.decode(content)
         val errors = bundle.validateAgainst(
             bookId = book.id,
@@ -52,7 +55,7 @@ class PortableAnalysisService(
         )
         store.activateRevisionWithManifest(runId, manifest)
 
-        return ImportedAnalysis(
+        return AnalysisImportResult(
             providerId = bundle.metadata.providerId,
             totalPhrases = manifest.size,
             attributedPhrases = result.attributions.size,
@@ -66,10 +69,10 @@ class PortableAnalysisService(
      * Restores a persisted phrase manifest without re-segmenting the whole book. The fallback is
      * evaluated only for books that have no usable cached manifest.
      */
-    suspend fun cached(
+    override suspend fun active(
         book: BookDocument,
         fallbackPhrases: () -> List<SpeechPhrase>,
-    ): CachedAnalysis {
+    ): ActiveSpeakerAnalysis {
         val storedManifest = store.manifest(book.id)
         val storedPhrases = storedManifest.toSpeechPhrases(book.text)
         val fallback = if (storedPhrases == null) fallbackPhrases() else null
@@ -81,7 +84,7 @@ class PortableAnalysisService(
         val basePhrases = storedPhrases ?: requireNotNull(fallback)
         if (storedPhrases == null) store.replaceManifest(book.id, manifest)
         val revision = store.observeActiveRevision(book.id).first()
-            ?: return CachedAnalysis.empty(basePhrases)
+            ?: return ActiveSpeakerAnalysis.empty(basePhrases)
         val attributions = store.activeAttributions(book.id)
         val attributionByIndex = manifest.mapNotNull { item ->
             attributions[item.phraseId]?.let { item.phraseIndex to it }
@@ -98,39 +101,13 @@ class PortableAnalysisService(
             .plus(NarratorProfile)
             .distinctBy(CharacterProfile::id)
 
-        return CachedAnalysis(
+        return ActiveSpeakerAnalysis(
             phrases = resolvedPhrases,
             characters = characters,
             cachedPhraseIndices = attributionByIndex.keys,
             emotionsByPhraseIndex = emotionsByPhraseIndex,
             providerId = revision.providerId,
         )
-    }
-
-    data class ImportedAnalysis(
-        val providerId: String,
-        val totalPhrases: Int,
-        val attributedPhrases: Int,
-        val characterCount: Int,
-    )
-
-    data class CachedAnalysis(
-        val phrases: List<SpeechPhrase>,
-        val characters: List<CharacterProfile>,
-        val cachedPhraseIndices: Set<Int>,
-        val emotionsByPhraseIndex: Map<Int, PhraseEmotion>,
-        val providerId: String?,
-    ) {
-        companion object {
-            fun empty(phrases: List<SpeechPhrase>) =
-                CachedAnalysis(
-                    phrases = phrases,
-                    characters = emptyList(),
-                    cachedPhraseIndices = emptySet(),
-                    emotionsByPhraseIndex = emptyMap(),
-                    providerId = null,
-                )
-        }
     }
 
     private companion object {

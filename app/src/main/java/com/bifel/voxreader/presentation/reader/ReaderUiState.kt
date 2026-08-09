@@ -1,82 +1,78 @@
 package com.bifel.voxreader.presentation.reader
 
+import com.bifel.voxreader.application.reader.PlaybackStatus
 import com.bifel.voxreader.domain.model.BookDocument
 import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.PhraseEmotion
+import com.bifel.voxreader.domain.model.ReaderSettings
 import com.bifel.voxreader.domain.model.SpeechPhrase
-import com.bifel.voxreader.domain.model.SpeechEngineMode
-import com.bifel.voxreader.domain.model.SpeechPostProcessingSettings
-import com.bifel.voxreader.domain.model.ReadingMode
-import com.bifel.voxreader.domain.model.ReaderFontFamily
-import com.bifel.voxreader.domain.model.ReaderTextAlignment
-import com.bifel.voxreader.domain.model.ReaderOrientation
-import com.bifel.voxreader.domain.model.ReaderImageSize
-import com.bifel.voxreader.domain.model.ReaderImageAlignment
-import com.bifel.voxreader.data.speech.PiperVoicePack
-import com.bifel.voxreader.data.speech.AdvancedVoice
-import com.bifel.voxreader.data.speech.AdvancedVoiceModel
-import com.bifel.voxreader.domain.speech.ProceduralVoice
+import com.bifel.voxreader.domain.speech.VoiceModel
+import com.bifel.voxreader.domain.speech.VoiceOption
 
-enum class PlaybackState {
-    DISABLED,
-    PAUSED,
-    PREPARING,
-    PLAYING,
-}
+typealias PlaybackState = PlaybackStatus
 
 data class ReaderUiState(
-    val isLoading: Boolean = true,
-    val book: BookDocument? = null,
-    val phrases: List<SpeechPhrase> = emptyList(),
-    val characters: List<CharacterProfile> = emptyList(),
-    val pageStart: Int = 0,
-    val pageEnd: Int = 0,
-    val darkTheme: Boolean = true,
-    val speechControlsEnabled: Boolean = false,
-    val playbackSpeed: Float = 1f,
-    val fontSizeSp: Float = 20f,
-    val lineHeightSp: Float = 31f,
-    val horizontalMarginDp: Float = 24f,
-    val topPaddingDp: Float = 22f,
-    val bottomPaddingDp: Float = 22f,
-    val fontFamily: ReaderFontFamily = ReaderFontFamily.SERIF,
-    val textAlignment: ReaderTextAlignment = ReaderTextAlignment.LEFT,
-    val paragraphSpacingSp: Float = 0f,
-    val firstLineIndentSp: Float = 0f,
-    val orientation: ReaderOrientation = ReaderOrientation.SYSTEM,
-    val keepScreenOn: Boolean = false,
-    val imageSize: ReaderImageSize = ReaderImageSize.FIT_WIDTH,
-    val imageAlignment: ReaderImageAlignment = ReaderImageAlignment.CENTER,
-    val customReaderColors: Boolean = false,
-    val readerBackgroundColor: Int = 0xFF090807.toInt(),
-    val readerTextColor: Int = 0xFFF4E9D6.toInt(),
-    val readerLinkColor: Int = 0xFF78A9FF.toInt(),
-    val readerHeadingColor: Int = 0xFFD8A35D.toInt(),
-    val readerHighlightColor: Int = 0x66D79A47,
-    val sleepCheckMinutes: Int = 5,
-    val sleepGraceSeconds: Int = 30,
-    val sleepTimerEnabled: Boolean = false,
-    val sleepTimerWarning: Boolean = false,
-    val readingMode: ReadingMode = ReadingMode.PAGINATED,
-    val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
-    val speechPostProcessing: SpeechPostProcessingSettings = SpeechPostProcessingSettings(),
-    val localGenerativeVoiceAvailable: Boolean = false,
-    val localVoicePacks: List<PiperVoicePack> = emptyList(),
-    val advancedVoiceModel: AdvancedVoiceModel? = null,
-    val advancedVoices: List<AdvancedVoice> = emptyList(),
-    val advancedVoiceAvailable: Boolean = false,
-    val proceduralVoices: List<ProceduralVoice> = emptyList(),
-    val chromeVisible: Boolean = false,
-    val playbackState: PlaybackState = PlaybackState.DISABLED,
-    val activePhraseIndex: Int? = null,
-    val highlightStart: Int? = null,
-    val highlightEnd: Int? = null,
-    val cachedSpeakerPhraseIndices: Set<Int> = emptySet(),
-    val phraseEmotions: Map<Int, PhraseEmotion> = emptyMap(),
-    val cachedAttributionProvider: String? = null,
-    val analysisMessage: String? = null,
-    val errorMessage: String? = null,
+    val session: ReaderSessionUiState = ReaderSessionUiState(),
+    val settings: ReaderSettings = ReaderSettings(),
+    val playback: ReaderPlaybackUiState = ReaderPlaybackUiState(),
+    val voices: ReaderVoiceUiState = ReaderVoiceUiState(),
+    val chrome: ReaderChromeUiState = ReaderChromeUiState(),
 ) {
+    val isLoading get() = session.isLoading
+    val book get() = session.book
+    val phrases get() = session.phrases
+    val characters get() = session.characters
+    val pageStart get() = session.pageStart
+    val pageEnd get() = session.pageEnd
+    val cachedSpeakerPhraseIndices get() = session.cachedSpeakerPhraseIndices
+    val phraseEmotions get() = session.phraseEmotions
+    val cachedAttributionProvider get() = session.cachedAttributionProvider
+    val analysisMessage get() = session.analysisMessage
+    val errorMessage get() = session.errorMessage
+
+    val darkTheme get() = settings.darkTheme
+    val speechControlsEnabled get() = settings.speechControlsEnabled
+    val playbackSpeed get() = settings.playbackSpeed
+    val fontSizeSp get() = settings.fontSizeSp
+    val lineHeightSp get() = settings.lineHeightSp
+    val horizontalMarginDp get() = settings.horizontalMarginDp
+    val topPaddingDp get() = settings.topPaddingDp
+    val bottomPaddingDp get() = settings.bottomPaddingDp
+    val fontFamily get() = settings.fontFamily
+    val textAlignment get() = settings.textAlignment
+    val paragraphSpacingSp get() = settings.paragraphSpacingSp
+    val firstLineIndentSp get() = settings.firstLineIndentSp
+    val orientation get() = settings.orientation
+    val keepScreenOn get() = settings.keepScreenOn
+    val imageSize get() = settings.imageSize
+    val imageAlignment get() = settings.imageAlignment
+    val customReaderColors get() = settings.customReaderColors
+    val readerBackgroundColor get() = settings.readerBackgroundColor
+    val readerTextColor get() = settings.readerTextColor
+    val readerLinkColor get() = settings.readerLinkColor
+    val readerHeadingColor get() = settings.readerHeadingColor
+    val readerHighlightColor get() = settings.readerHighlightColor
+    val sleepCheckMinutes get() = settings.sleepCheckMinutes
+    val sleepGraceSeconds get() = settings.sleepGraceSeconds
+    val readingMode get() = settings.readingMode
+    val speechEngineMode get() = settings.speechEngineMode
+    val speechPostProcessing get() = settings.speechPostProcessing
+
+    val playbackState get() = playback.status
+    val activePhraseIndex get() = playback.activePhraseIndex
+    val highlightStart get() = playback.highlightStart
+    val highlightEnd get() = playback.highlightEnd
+    val sleepTimerEnabled get() = playback.sleepTimerEnabled
+    val sleepTimerWarning get() = playback.sleepTimerWarning
+
+    val localGenerativeVoiceAvailable get() = voices.localGenerativeAvailable
+    val localVoicePacks get() = voices.localModels
+    val advancedVoiceModel get() = voices.advancedModel
+    val advancedVoices get() = voices.advancedVoices
+    val advancedVoiceAvailable get() = voices.advancedAvailable
+    val proceduralVoices get() = voices.proceduralVoices
+    val chromeVisible get() = chrome.visible
+
     val readingProgress: Float
         get() {
             val length = book?.text?.length ?: return 0f
@@ -84,3 +80,37 @@ data class ReaderUiState(
             return pageStart.toFloat().div(length).coerceIn(0f, 1f)
         }
 }
+
+data class ReaderSessionUiState(
+    val isLoading: Boolean = true,
+    val book: BookDocument? = null,
+    val phrases: List<SpeechPhrase> = emptyList(),
+    val characters: List<CharacterProfile> = emptyList(),
+    val pageStart: Int = 0,
+    val pageEnd: Int = 0,
+    val cachedSpeakerPhraseIndices: Set<Int> = emptySet(),
+    val phraseEmotions: Map<Int, PhraseEmotion> = emptyMap(),
+    val cachedAttributionProvider: String? = null,
+    val analysisMessage: String? = null,
+    val errorMessage: String? = null,
+)
+
+data class ReaderPlaybackUiState(
+    val status: PlaybackState = PlaybackState.DISABLED,
+    val activePhraseIndex: Int? = null,
+    val highlightStart: Int? = null,
+    val highlightEnd: Int? = null,
+    val sleepTimerEnabled: Boolean = false,
+    val sleepTimerWarning: Boolean = false,
+)
+
+data class ReaderVoiceUiState(
+    val localGenerativeAvailable: Boolean = false,
+    val localModels: List<VoiceModel> = emptyList(),
+    val advancedModel: VoiceModel? = null,
+    val advancedVoices: List<VoiceOption> = emptyList(),
+    val advancedAvailable: Boolean = false,
+    val proceduralVoices: List<VoiceOption> = emptyList(),
+)
+
+data class ReaderChromeUiState(val visible: Boolean = false)

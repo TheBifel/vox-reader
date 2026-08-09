@@ -18,6 +18,11 @@ class ReadingHistory(
 
     fun goForward(current: Int): Int? = move(forward, back, current)
 
+    fun clear() {
+        back.clear()
+        forward.clear()
+    }
+
     private fun move(from: ArrayDeque<Int>, to: ArrayDeque<Int>, current: Int): Int? {
         val target = from.removeLastOrNull() ?: return null
         to.addLast(current)
