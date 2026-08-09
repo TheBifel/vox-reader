@@ -1,45 +1,36 @@
 # VoxReader
 
-VoxReader is an offline-first Android EPUB reader that reads books aloud while assigning stable
-voice variations to recurring characters. The proof of concept is built with Kotlin, Jetpack
-Compose, MVVM, DataStore, portable speaker-analysis JSON files, Android's local text-to-speech
-service, and optional downloaded on-device Piper or KittenTTS Micro voices.
+VoxReader is an offline-first Android EPUB/FB2 reader with real-time, character-aware local speech. It uses Kotlin, Jetpack Compose, MVVM, DataStore, Room, Android TTS, Piper, and KittenTTS Micro.
 
-See [Product and solution overview](docs/PRODUCT_AND_SOLUTION.md) for the product goal, user flow,
-architecture, processing pipeline, current limitations, and implementation roadmap.
+## Run the app
 
-See [Whole-book pre-analysis implementation plan](docs/BOOK_PREANALYSIS_IMPLEMENTATION_PLAN.md)
-for the future overnight on-phone and opt-in paid cloud cache paths.
-
-See [FBReader feature opportunities](docs/FBREADER_FEATURE_OPPORTUNITIES.md) for a sourced,
-YAGNI-filtered list of reader UI and logic ideas worth considering next.
-
-## Open in Android Studio
-
-1. Open the `VoxReader` folder as a project.
-2. Allow Gradle sync to complete.
-3. Select an Android device running API 26 or later.
+1. Open this repository in Android Studio.
+2. Sync Gradle with JDK 21 and Android SDK 36 installed.
+3. Select an API 26+ emulator.
 4. Run the `app` configuration.
-5. In Android's Files app, tap an EPUB and select VoxReader.
+5. Open an EPUB/FB2 through Android **Open with** or use **Open** in the app drawer.
 
-The app intentionally has no file picker in this POC. A new book enters the library only through
-Android's **Open with** flow.
+For command-line verification:
 
-## Reader controls
+```powershell
+.\gradlew.bat testDebugUnitTest lintDebug assembleDebug --console=plain --no-daemon
+```
 
-- Tap the centre of a page to reveal the reading controls and hamburger menu.
-- The table of contents is collapsed by default; expand it only when you want to jump chapters.
-- **Characters and voices** opens a focused dialog for colour legend and per-character voice tuning.
-- **Voice engine** selects Procedural, AI Simple (Piper), or AI Advanced (KittenTTS Micro).
-- The matching local AI model screen shows a concise use-oriented
-  description, its installed size, download status/progress, and explicit **Play**, **Download**,
-  or **Remove** controls.
-- While a book is playing, VoxReader uses Android media controls and a foreground playback service.
-  It holds a partial wake lock only during active playback so local AI phrase generation remains
-  responsive while the screen is locked.
+## What is implemented
 
-## Repository test data
+- Horizontal pagination and vertical scrolling with saved position, TOC, progress, history, links, appearance controls, and sleep timer.
+- Foreground speech with system media controls and screen-lock support.
+- Procedural Android TTS, AI Simple/Piper, and AI Advanced/KittenTTS Micro engines.
+- Downloadable app-private voice models, character voice assignment, phrase lookahead, and bounded neural PCM buffering.
+- Imported speaker-analysis JSON with character colors, narrator/unknown identities, optional emotions, and configurable engine-independent post-processing.
 
-`test-data/` intentionally contains only the two user-supplied EPUB fixtures and their matching
-speaker-analysis JSON files. Do not add book text, generated screenshots, downloaded models, or
-private analysis work directories to version control.
+No speaker map is required: narrator-only playback remains available. VoxReader performs no live LLM attribution and does not upload book text.
+
+## Project documentation
+
+- Agents: [AGENTS.md](AGENTS.md)
+- Durable project memory: [docs/memory/README.md](docs/memory/README.md)
+- Complete documentation map: [docs/README.md](docs/README.md)
+- Speaker-map format: [docs/reference/SPEAKER_ANALYSIS_JSON.md](docs/reference/SPEAKER_ANALYSIS_JSON.md)
+
+Local books, speaker maps, downloaded models, screenshots, work packets, and secrets are intentionally excluded from version control.

@@ -12,20 +12,25 @@ that book. The reader does not depend on the producer.
 ## User workflow
 
 1. Open the EPUB in VoxReader.
-2. Choose **Export speaker analysis JSON** in the reader drawer.
-3. Send the exported file to an analysis tool or edit it manually.
-4. Preserve phrase identity and text fields; fill the speaker and voice fields.
-5. Choose **Import speaker analysis JSON**.
-6. VoxReader validates the complete document before activating it.
+2. Produce a sidecar from the exact book outside the app, normally with the repository's
+   `voxreader-label-book` skill, or obtain a compatible sidecar from another analysis tool.
+3. Preserve the immutable book and phrase identity fields while assigning speakers and optional
+   emotions.
+4. Choose **Import character map** in the reader drawer and select the JSON.
+5. VoxReader validates the complete document before activating it.
 
 Known cached speakers immediately receive stable per-character highlight colors. Narration remains
 uncolored; unresolved `unknown` phrases receive a stable diagnostic color so gaps in the external
 analysis are visible on the page. The active playback highlight is drawn more strongly.
 
-The updated book-labeling tool may also create the JSON directly from the exact EPUB file. If its
+The book-labeling tool can create the JSON directly from the exact EPUB file. If its
 book hash and immutable phrase data validate, VoxReader adopts that JSON phrase manifest for the
 book. This handles legitimate desktop/Android sentence-boundary differences without guessing or
 discarding assignments.
+
+VoxReader currently has no sidecar export action. A sidecar prepared directly from EPUB is
+provisional until it passes the app's import validator; that validator is the authoritative
+compatibility check.
 
 An imported JSON is authoritative. Every row, including `narrator` and `unknown`, is considered a
 completed decision. VoxReader does not run live attribution; it renders cached speaker colors and

@@ -485,19 +485,6 @@ fun unknownSidecarRow(
         emotion = null,
     )
 
-fun narratorSidecarRow(
-    item: PhraseManifestItem,
-    text: String,
-): AnalysisSidecarRow =
-    unknownSidecarRow(item, text).copy(
-        speakerId = NARRATOR_ID,
-        speakerName = "Narrator",
-        voiceGroup = VoiceGroup.NARRATOR,
-        confidence = 1f,
-        evidence = EvidenceKind.EXPLICIT_TAG,
-        source = AttributionSource.DETERMINISTIC,
-    )
-
 @Serializable
 private data class SidecarDocument(
     val format: String = SIDECAR_FORMAT,

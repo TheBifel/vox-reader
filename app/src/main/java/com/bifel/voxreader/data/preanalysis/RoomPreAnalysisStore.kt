@@ -136,14 +136,6 @@ class RoomPreAnalysisStore(
         }
     }
 
-    suspend fun upsertCharacters(
-        bookId: String,
-        runId: AnalysisRunId,
-        characters: List<CharacterProfile>,
-    ) {
-        characterDao.upsert(characters.map { it.toEntity(bookId, runId.value) })
-    }
-
     suspend fun stageValidatedRevision(
         runId: AnalysisRunId,
         attributions: List<SpeakerAttribution>,

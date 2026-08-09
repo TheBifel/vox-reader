@@ -74,7 +74,6 @@ data class ReaderUiState(
     val cachedSpeakerPhraseIndices: Set<Int> = emptySet(),
     val phraseEmotions: Map<Int, PhraseEmotion> = emptyMap(),
     val cachedAttributionProvider: String? = null,
-    val cachedAttributionCoverage: Float = 0f,
     val analysisMessage: String? = null,
     val errorMessage: String? = null,
 ) {

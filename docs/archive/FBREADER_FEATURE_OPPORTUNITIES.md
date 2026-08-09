@@ -1,5 +1,9 @@
 # FBReader feature opportunities for VoxReader
 
+> Historical research snapshot. Several opportunities listed here have since shipped or changed.
+> Use [product memory](../memory/PRODUCT.md) and [current state](../memory/STATE.md) for present
+> behavior; retain this document only as background research.
+
 ## Purpose and evidence boundary
 
 This document identifies reader ideas that VoxReader could adapt from FBReader without expanding

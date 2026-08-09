@@ -1818,16 +1818,6 @@ private fun renderPageText(text: String, page: PageLayout, paragraphSpacingSp: F
     return RenderedPageText(output.toString(), bookToVisual, visualToBook.toIntArray())
 }
 
-private fun formatCoverage(coverage: Float): String {
-    val percentage = coverage.coerceIn(0f, 1f) * 100f
-    return when {
-        percentage == 0f -> "0%"
-        percentage < 0.1f -> "<0.1%"
-        percentage < 10f -> "${(percentage * 10).roundToInt() / 10f}%"
-        else -> "${percentage.roundToInt()}%"
-    }
-}
-
 @Composable
 private fun ReaderHeader(
     title: String,

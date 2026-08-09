@@ -1,5 +1,9 @@
 # VoxReader architecture review
 
+> Historical snapshot (2026-08-02). This review describes an earlier codebase; several findings
+> and line references are now obsolete. Use [current architecture memory](../memory/ARCHITECTURE.md)
+> and [technical debt](../memory/TECH_DEBT.md) for active guidance.
+
 **Scope.** Static review of the repository as it existed on 2026-08-02, including the current working tree (which already contains uncommitted application changes). No application or build files were modified. `gradlew.bat testDebugUnitTest` completed successfully during this review.
 
 ## Executive assessment
@@ -37,13 +41,13 @@ domain: reader models, repository interfaces, segmentation, speech contracts,
 presentation: one reader UI file, UI state, paging/navigation helpers, view model
 ```
 
-`AppContainer` is an appropriate small manual composition root ([`AppContainer.kt:16-30`](../app/src/main/java/com/bifel/voxreader/AppContainer.kt)); a DI framework would be YAGNI at this scale. The useful dependency direction is sometimes broken, however: presentation imports concrete data classes/services ([`ReaderViewModel.kt:5,26,31`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt) and [`ReaderUiState.kt:9`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderUiState.kt)).
+`AppContainer` is an appropriate small manual composition root ([`AppContainer.kt:16-30`](../../app/src/main/java/com/bifel/voxreader/AppContainer.kt)); a DI framework would be YAGNI at this scale. The useful dependency direction is sometimes broken, however: presentation imports concrete data classes/services ([`ReaderViewModel.kt:5,26,31`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt) and [`ReaderUiState.kt:9`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderUiState.kt)).
 
 ## Findings (priority order)
 
 ### P0 — split the reader coordinator before adding more reader features
 
-**Evidence.** `ReaderViewModel` has nine constructor dependencies ([`ReaderViewModel.kt:42-52`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)); subscribes to settings, both engines, voice packs, and service commands in its initializer ([`ReaderViewModel.kt:67-115`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)); directly manages history, phrase buffering, playback sessions, UI state, persistence, imports, and previews. `ReaderScreen` has 1,817 lines and contains reader layout, scrolling/pagination, drawer/settings, progress navigation, playback controls, engine/model dialogs, and a character editor (for example [`ReaderScreen.kt:683-1071`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderScreen.kt) and [`ReaderScreen.kt:1453-1742`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderScreen.kt)).
+**Evidence.** `ReaderViewModel` has nine constructor dependencies ([`ReaderViewModel.kt:42-52`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)); subscribes to settings, both engines, voice packs, and service commands in its initializer ([`ReaderViewModel.kt:67-115`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)); directly manages history, phrase buffering, playback sessions, UI state, persistence, imports, and previews. `ReaderScreen` has 1,817 lines and contains reader layout, scrolling/pagination, drawer/settings, progress navigation, playback controls, engine/model dialogs, and a character editor (for example [`ReaderScreen.kt:683-1071`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderScreen.kt) and [`ReaderScreen.kt:1453-1742`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderScreen.kt)).
 
 **Why it matters.** This violates SRP and makes `ReaderViewModel` the accidental owner of both product workflow and platform delivery mechanics. It has no focused unit tests; most current tests target pure utility classes. Any new concern expands a class that is already hard to reason about.
 
@@ -57,7 +61,7 @@ The view model should translate UI actions into calls and compose their state in
 
 ### P0 — restore a presentation/application boundary around Android and Piper implementations
 
-**Evidence.** The view model calls `MediaPlaybackService.stop()` and collects its process-global `commands` flow ([`ReaderViewModel.kt:105-114,164-169`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)). It accepts `PiperVoicePackManager` and `PortableAnalysisService` concrete data-layer classes ([`ReaderViewModel.kt:50-51`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)); the UI state exposes `data.speech.PiperVoicePack` ([`ReaderUiState.kt:33-34`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderUiState.kt)).
+**Evidence.** The view model calls `MediaPlaybackService.stop()` and collects its process-global `commands` flow ([`ReaderViewModel.kt:105-114,164-169`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)). It accepts `PiperVoicePackManager` and `PortableAnalysisService` concrete data-layer classes ([`ReaderViewModel.kt:50-51`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)); the UI state exposes `data.speech.PiperVoicePack` ([`ReaderUiState.kt:33-34`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderUiState.kt)).
 
 **Why it matters.** View-model tests require Android-adjacent implementations or substantial mocking, and storage/download/service changes necessarily affect presentation types. The static shared-flow service bridge also has implicit process/lifecycle semantics and no clear owner.
 
@@ -65,7 +69,7 @@ The view model should translate UI actions into calls and compose their state in
 
 ### P1 — separate policy/state from transport in the voice-pack feature
 
-**Evidence.** `PiperVoicePackManager` owns a 46-entry product catalog, remote URL construction, HTTP transport, progress/UI states, filesystem layout, installation marker, deletion, and user-facing descriptions ([`PiperVoicePackManager.kt:22-128`](../app/src/main/java/com/bifel/voxreader/data/speech/PiperVoicePackManager.kt), [`PiperVoicePackManager.kt:132-205`](../app/src/main/java/com/bifel/voxreader/data/speech/PiperVoicePackManager.kt)). `SherpaPiperSpeechEngine` then depends on that manager’s model path/selection.
+**Evidence.** `PiperVoicePackManager` owns a 46-entry product catalog, remote URL construction, HTTP transport, progress/UI states, filesystem layout, installation marker, deletion, and user-facing descriptions ([`PiperVoicePackManager.kt:22-128`](../../app/src/main/java/com/bifel/voxreader/data/speech/PiperVoicePackManager.kt), [`PiperVoicePackManager.kt:132-205`](../../app/src/main/java/com/bifel/voxreader/data/speech/PiperVoicePackManager.kt)). `SherpaPiperSpeechEngine` then depends on that manager’s model path/selection.
 
 **Why it matters.** It has multiple reasons to change (catalog curation, download robustness, storage policy, UI wording, model/runtime compatibility), and tests for any one concern require the others. It also makes a large catalog a code change.
 
@@ -73,7 +77,7 @@ The view model should translate UI actions into calls and compose their state in
 
 ### P1 — distinguish active product scope from staged/future analysis machinery
 
-**Evidence.** The README describes manual portable JSON as the POC and calls overnight/cloud processing future work ([`README.md`](../README.md)). The runtime supports import and cache lookup, but no UI invokes `PortableAnalysisService.export`; repository search finds its `export` method only at its definition. Room nevertheless models runs with `PREPARING`, `READY`, `PARTIAL`, `FAILED`, cancellation, provider/model IDs, four version fields, staging, activation and migrations ([`PreAnalysisEntities.kt:14-98`](../app/src/main/java/com/bifel/voxreader/data/database/entity/PreAnalysisEntities.kt), [`RoomPreAnalysisStore.kt:43-160`](../app/src/main/java/com/bifel/voxreader/data/preanalysis/RoomPreAnalysisStore.kt)).
+**Evidence.** The README describes manual portable JSON as the POC and calls overnight/cloud processing future work ([`README.md`](../../README.md)). The runtime supports import and cache lookup, but no UI invokes `PortableAnalysisService.export`; repository search finds its `export` method only at its definition. Room nevertheless models runs with `PREPARING`, `READY`, `PARTIAL`, `FAILED`, cancellation, provider/model IDs, four version fields, staging, activation and migrations ([`PreAnalysisEntities.kt:14-98`](../../app/src/main/java/com/bifel/voxreader/data/database/entity/PreAnalysisEntities.kt), [`RoomPreAnalysisStore.kt:43-160`](../../app/src/main/java/com/bifel/voxreader/data/preanalysis/RoomPreAnalysisStore.kt)).
 
 **Assessment.** The imported sidecar schema and its strict validation are justified: externally supplied input needs stable identity, bounds checks, and clear errors. The internal multi-run/provider lifecycle is partly anticipatory while only one import producer is active.
 
@@ -86,28 +90,28 @@ Do not retain a half-implemented workflow solely for a possible cloud feature.
 
 ### P1 — make persistence ownership explicit; avoid two authoritative stores for voice profiles
 
-**Evidence.** `updateCharacterVoice` optimistically mutates state and writes the same profile to both `LibraryRepository` and `PortableAnalysisService` ([`ReaderViewModel.kt:237-253`](../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)). `StoredBook.voiceOverrides` is JSON in DataStore, while analysis characters live in Room. A failed second write can leave the two copies divergent; neither operation is coordinated transactionally.
+**Evidence.** `updateCharacterVoice` optimistically mutates state and writes the same profile to both `LibraryRepository` and `PortableAnalysisService` ([`ReaderViewModel.kt:237-253`](../../app/src/main/java/com/bifel/voxreader/presentation/reader/ReaderViewModel.kt)). `StoredBook.voiceOverrides` is JSON in DataStore, while analysis characters live in Room. A failed second write can leave the two copies divergent; neither operation is coordinated transactionally.
 
 **Refactor.** Declare one source of truth for user voice overrides. The smallest change is to keep per-book user overrides in the library store and treat Room character entries as imported analysis only; merge them when projecting the reader model. Alternatively, persist all character/override data in Room and remove the DataStore duplication. Add a failure/reload test for the chosen invariant.
 
 ### P2 — remove or reduce thin abstractions that have no current caller value
 
-**Evidence.** `LibraryRepository.library` is declared ([`ReaderRepositories.kt:17-25`](../app/src/main/java/com/bifel/voxreader/domain/repository/ReaderRepositories.kt)) but has no production reference. `PortableAnalysisService.export` likewise has no production caller. `ImportBookUseCase` and `LoadLatestBookUseCase` are each thin two-operation wrappers ([`ReaderUseCases.kt:8-29`](../app/src/main/java/com/bifel/voxreader/domain/usecase/ReaderUseCases.kt)).
+**Evidence.** `LibraryRepository.library` is declared ([`ReaderRepositories.kt:17-25`](../../app/src/main/java/com/bifel/voxreader/domain/repository/ReaderRepositories.kt)) but has no production reference. `PortableAnalysisService.export` likewise has no production caller. `ImportBookUseCase` and `LoadLatestBookUseCase` are each thin two-operation wrappers ([`ReaderUseCases.kt:8-29`](../../app/src/main/java/com/bifel/voxreader/domain/usecase/ReaderUseCases.kt)).
 
 **Refactor.** Delete unused public API after confirming no planned consumer, or add the intended consumer in the same change. Keep the two use cases only if the team considers their orchestration boundary valuable; otherwise fold each into a clearly named reader-library application service. Do not create additional one-method use-case classes by default.
 
 ### P2 — improve test coverage where behavior is currently stateful or platform-coupled
 
-**Evidence.** Existing unit tests are a good start for parser, segmenter, sidecar JSON, speech text/delivery/buffer, page navigation, and phrase lookup. There are no unit tests for `ReaderViewModel`, `ReaderDataStoreRepository`, `RoomPreAnalysisStore`, `PortableAnalysisService`, `PiperVoicePackManager`, either speech engine, or `MediaPlaybackService` (test source inventory under [`app/src/test`](../app/src/test)).
+**Evidence.** Existing unit tests are a good start for parser, segmenter, sidecar JSON, speech text/delivery/buffer, page navigation, and phrase lookup. There are no unit tests for `ReaderViewModel`, `ReaderDataStoreRepository`, `RoomPreAnalysisStore`, `PortableAnalysisService`, `PiperVoicePackManager`, either speech engine, or `MediaPlaybackService` (test source inventory under [`app/src/test`](../../app/src/test)).
 
 **Refactor.** First add tests alongside the P0 extraction rather than trying to mock the current 879-line view model. Cover: stale speech event rejection/session cancellation; page-history invariants; analysis import then override persistence; invalid/missing voice pack behavior; and replacing an active analysis revision. Add one instrumented test for URI EPUB open and media-service notification lifecycle when practical.
 
 ## What should remain as-is for now
 
-- **Manual `AppContainer`.** It is readable and appropriate for one module. ([`AppContainer.kt:16-30`](../app/src/main/java/com/bifel/voxreader/AppContainer.kt))
+- **Manual `AppContainer`.** It is readable and appropriate for one module. ([`AppContainer.kt:16-30`](../../app/src/main/java/com/bifel/voxreader/AppContainer.kt))
 - **Small pure helper objects.** `SentenceSegmenter`, `PhraseLookup`, `PageNavigation`, `PageCalculator`, `SpeechText`, `EmotionDelivery`, and `PhrasePlaybackBuffer` are cohesive, have focused tests, and are lower-risk than a generic “utility” layer.
-- **Strict sidecar validation.** The size cap, schema/version checks, immutable phrase-identity checks, range/coverage validation, and enum validation in [`AnalysisSidecarJson.kt:69-234`](../app/src/main/java/com/bifel/voxreader/domain/preanalysis/sidecar/AnalysisSidecarJson.kt) are proportional to an external-file trust boundary.
-- **File-import copy and SHA-256 identity.** [`LocalBookRepository.kt:18-55`](../app/src/main/java/com/bifel/voxreader/data/epub/LocalBookRepository.kt) sensibly takes ownership of document availability offline and cleans its temporary import file on failure.
+- **Strict sidecar validation.** The size cap, schema/version checks, immutable phrase-identity checks, range/coverage validation, and enum validation in [`AnalysisSidecarJson.kt:69-234`](../../app/src/main/java/com/bifel/voxreader/domain/preanalysis/sidecar/AnalysisSidecarJson.kt) are proportional to an external-file trust boundary.
+- **File-import copy and SHA-256 identity.** [`LocalBookRepository.kt:18-55`](../../app/src/main/java/com/bifel/voxreader/data/epub/LocalBookRepository.kt) sensibly takes ownership of document availability offline and cleans its temporary import file on failure.
 - **No file-picker feature.** The README’s Android “Open with” decision is a valid POC YAGNI choice; do not add library browsing until the product actually needs it.
 
 ## Prioritized delivery plan

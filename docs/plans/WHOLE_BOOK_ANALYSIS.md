@@ -1,5 +1,8 @@
 # VoxReader whole-book pre-analysis: implementation and design plan
 
+> **Status: deferred and not implemented.** This is a design reference, not current product
+> behavior. See [current state](../memory/STATE.md) before scheduling any part of it.
+
 ## Document status
 
 This document designs two future VoxReader features:
@@ -8,7 +11,7 @@ This document designs two future VoxReader features:
 2. explicitly enabled, paid cloud pre-recognition using a batch-capable model provider such as
    Claude Haiku.
 
-It is an implementation plan, not a description of currently shipped behavior. Both paths produce
+It is an implementation plan, not a description of currently shipped behavior. Both paths would produce
 the same local attribution cache, character registry, and voice assignments. The reader consumes
 that cache without knowing which provider created it.
 

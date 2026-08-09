@@ -554,7 +554,6 @@ class ReaderViewModel(
                         cachedSpeakerPhraseIndices = cached.cachedPhraseIndices,
                         phraseEmotions = cached.emotionsByPhraseIndex,
                         cachedAttributionProvider = cached.providerId,
-                        cachedAttributionCoverage = cached.coverage,
                         analysisMessage = buildString {
                             append("Loaded ")
                             append(result.attributedPhrases)
@@ -617,7 +616,6 @@ class ReaderViewModel(
                 cachedSpeakerPhraseIndices = emptySet(),
                 phraseEmotions = emptyMap(),
                 cachedAttributionProvider = null,
-                cachedAttributionCoverage = 0f,
                 analysisMessage = "Preparing speech phrases in the background…",
                 errorMessage = null,
             )
@@ -637,7 +635,6 @@ class ReaderViewModel(
                 cachedSpeakerPhraseIndices = cached.cachedPhraseIndices,
                 phraseEmotions = cached.emotionsByPhraseIndex,
                 cachedAttributionProvider = cached.providerId,
-                cachedAttributionCoverage = cached.coverage,
                 analysisMessage = cached.providerId?.let { provider ->
                     "Using cached speaker analysis from $provider."
                 },

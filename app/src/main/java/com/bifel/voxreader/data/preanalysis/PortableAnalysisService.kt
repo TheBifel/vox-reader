@@ -13,8 +13,8 @@ import com.bifel.voxreader.domain.preanalysis.sidecar.AnalysisSidecarJson
 import kotlinx.coroutines.flow.first
 
 /**
- * The application boundary shared by manual files, desktop/cloud processing, and the future
- * overnight provider. Every producer ultimately imports the same validated JSON revision.
+ * The application boundary shared by every external sidecar producer. Each producer ultimately
+ * imports the same validated JSON revision.
  */
 class PortableAnalysisService(
     private val store: RoomPreAnalysisStore,
@@ -104,7 +104,6 @@ class PortableAnalysisService(
             cachedPhraseIndices = attributionByIndex.keys,
             emotionsByPhraseIndex = emotionsByPhraseIndex,
             providerId = revision.providerId,
-            coverage = revision.coverage,
         )
     }
 
@@ -121,7 +120,6 @@ class PortableAnalysisService(
         val cachedPhraseIndices: Set<Int>,
         val emotionsByPhraseIndex: Map<Int, PhraseEmotion>,
         val providerId: String?,
-        val coverage: Float,
     ) {
         companion object {
             fun empty(phrases: List<SpeechPhrase>) =
@@ -131,7 +129,6 @@ class PortableAnalysisService(
                     cachedPhraseIndices = emptySet(),
                     emotionsByPhraseIndex = emptyMap(),
                     providerId = null,
-                    coverage = 0f,
                 )
         }
     }

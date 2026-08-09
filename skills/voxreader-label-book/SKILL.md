@@ -9,8 +9,8 @@ Produce a portable speaker-attribution sidecar without changing phrase boundarie
 
 ## Required workflow
 
-1. Prefer an unassigned JSON file exported by VoxReader. It contains the app's exact phrase IDs and is the only guaranteed import-compatible source.
-2. If only an EPUB is available, run the direct-EPUB preparation mode. Treat its JSON as provisional and validate it in VoxReader because sentence-boundary behavior can differ by platform.
+1. If an external preparation tool supplied an immutable base JSON for the exact book, use it as the phrase manifest and preserve every identity field.
+2. Otherwise run direct-EPUB preparation mode. VoxReader has no JSON export action, so direct preparation is the normal repository workflow. Treat its output as provisional and validate it by importing it into VoxReader because sentence-boundary behavior can differ by platform.
 3. Keep the input book and generated work directory outside version control. Never add copyrighted book text to the skill.
 4. Read [references/attribution-protocol.md](references/attribution-protocol.md) before labeling. When integrating a model API, also read [references/model-adapters.md](references/model-adapters.md).
 5. Prepare chapter packets:
