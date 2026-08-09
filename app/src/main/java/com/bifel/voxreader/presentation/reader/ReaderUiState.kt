@@ -5,6 +5,7 @@ import com.bifel.voxreader.domain.model.CharacterProfile
 import com.bifel.voxreader.domain.model.PhraseEmotion
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.domain.model.SpeechPostProcessingSettings
 import com.bifel.voxreader.domain.model.ReadingMode
 import com.bifel.voxreader.domain.model.ReaderFontFamily
 import com.bifel.voxreader.domain.model.ReaderTextAlignment
@@ -58,6 +59,7 @@ data class ReaderUiState(
     val sleepTimerWarning: Boolean = false,
     val readingMode: ReadingMode = ReadingMode.PAGINATED,
     val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
+    val speechPostProcessing: SpeechPostProcessingSettings = SpeechPostProcessingSettings(),
     val localGenerativeVoiceAvailable: Boolean = false,
     val localVoicePacks: List<PiperVoicePack> = emptyList(),
     val advancedVoiceModel: AdvancedVoiceModel? = null,

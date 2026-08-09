@@ -3,6 +3,7 @@ package com.bifel.voxreader.data.speech
 import android.content.Context
 import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
+import android.os.Bundle
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
@@ -128,13 +129,16 @@ class AndroidSpeechEngine(
             configuredSpeechRate = speechRate
         }
 
+        val speechParameters = Bundle().apply {
+            putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, request.loudness.coerceIn(0f, 1f))
+        }
         val result = textToSpeech.speak(
             request.text,
             when (queueMode) {
                 SpeechQueueMode.FLUSH -> TextToSpeech.QUEUE_FLUSH
                 SpeechQueueMode.APPEND -> TextToSpeech.QUEUE_ADD
             },
-            null,
+            speechParameters,
             request.utteranceId,
         )
         if (result == TextToSpeech.ERROR) {

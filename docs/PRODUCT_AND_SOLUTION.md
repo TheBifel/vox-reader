@@ -255,12 +255,13 @@ VoxReader exposes three interchangeable implementations of the `SpeechEngine` co
 - emits start, range, completion, stop, and error events; and
 - uses range offsets to synchronize highlighting.
 
-The final TTS pitch and rate are composed from the saved character profile, the global playback
-speed, and the imported phrase emotion. For the current POC, anger is faster and slightly lower,
-sadness is slower and lower with a longer pause, excitement is faster and slightly higher, and
-fear is faster and higher with a shorter pause. Emotion intensity controls how far the delivery
-moves away from neutral. User-edited voice settings are kept separately from the imported JSON,
-so reimporting an updated analysis does not erase those choices.
+The final delivery is composed from the saved character profile, global playback speed, and the
+optional imported phrase emotion. A reader-wide post-processing switch gates editable profiles
+for all supported emotions. Each profile controls speed, pitch, loudness, warm/bright tone, and
+the trailing pause; intensity controls how far the result moves from neutral. Android TTS applies
+its native controls, while neural engines also transform generated PCM before caching. User-edited
+voice and emotion settings are kept separately from imported JSON, so reimporting analysis does
+not erase those choices.
 
 Speech is generated in real time. Look-ahead requests are submitted while the current sentence is
 playing, so playback advances to queued Android TTS work or already generated neural PCM instead of

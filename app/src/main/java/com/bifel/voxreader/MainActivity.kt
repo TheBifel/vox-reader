@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
                         },
                         onSetPlaybackSpeed = viewModel::setPlaybackSpeed,
                         onSetSpeechEngineMode = viewModel::setSpeechEngineMode,
+                        onSetSpeechPostProcessing = viewModel::setSpeechPostProcessing,
                         onDownloadLocalVoice = viewModel::downloadLocalVoice,
                         onRemoveLocalVoice = viewModel::removeLocalVoice,
                         onPreviewLocalVoice = viewModel::previewLocalVoice,

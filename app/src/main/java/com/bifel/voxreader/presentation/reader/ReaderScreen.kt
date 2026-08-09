@@ -111,6 +111,10 @@ import com.bifel.voxreader.domain.model.UnknownProfile
 import com.bifel.voxreader.domain.model.SpeechPhrase
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.domain.model.EmotionProcessingProfile
+import com.bifel.voxreader.domain.model.EmotionType
+import com.bifel.voxreader.domain.model.SpeechPostProcessingSettings
+import com.bifel.voxreader.domain.model.defaultEmotionProcessingProfiles
 import com.bifel.voxreader.domain.model.ReadingMode
 import com.bifel.voxreader.domain.model.ReaderFontFamily
 import com.bifel.voxreader.domain.model.ReaderTextAlignment
@@ -147,6 +151,7 @@ fun ReaderScreen(
     onImportAnalysis: () -> Unit,
     onSetPlaybackSpeed: (Float) -> Unit,
     onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
+    onSetSpeechPostProcessing: (SpeechPostProcessingSettings) -> Unit,
     onDownloadLocalVoice: (String) -> Unit,
     onRemoveLocalVoice: (String) -> Unit,
     onPreviewLocalVoice: (String) -> Unit,
@@ -183,6 +188,7 @@ fun ReaderScreen(
     var showVoiceModels by remember { mutableStateOf(false) }
     var showAdvancedVoiceModels by remember { mutableStateOf(false) }
     var showProceduralVoices by remember { mutableStateOf(false) }
+    var showSpeechPostProcessing by remember { mutableStateOf(false) }
     var showColors by remember { mutableStateOf(false) }
     var showDisplay by remember { mutableStateOf(false) }
     var showImages by remember { mutableStateOf(false) }
@@ -257,6 +263,11 @@ fun ReaderScreen(
                 onRemove = onRemoveAdvancedModel,
                 onPreview = onPreviewAdvancedVoice,
             )
+            showSettings && showSpeechPostProcessing -> SpeechPostProcessingScreen(
+                settings = state.speechPostProcessing,
+                onBack = { showSpeechPostProcessing = false },
+                onSave = onSetSpeechPostProcessing,
+            )
             showSettings -> SettingsScreen(
                 state = state,
                 onBack = { showSettings = false },
@@ -268,6 +279,7 @@ fun ReaderScreen(
                     showProceduralVoices = true
                 },
                 onSetSpeechEngineMode = onSetSpeechEngineMode,
+                onShowSpeechPostProcessing = { showSpeechPostProcessing = true },
                 onShowColors = { showColors = true },
                 onShowDisplay = { showDisplay = true },
                 onShowImages = { showImages = true },
@@ -520,6 +532,7 @@ private fun SettingsScreen(
     onShowAdvancedVoiceModels: () -> Unit,
     onShowProceduralVoices: () -> Unit,
     onSetSpeechEngineMode: (SpeechEngineMode) -> Unit,
+    onShowSpeechPostProcessing: () -> Unit,
     onShowColors: () -> Unit,
     onShowDisplay: () -> Unit,
     onShowImages: () -> Unit,
@@ -583,6 +596,19 @@ private fun SettingsScreen(
                 showEngineDialog = true
             },
         )
+        ListItem(
+            headlineContent = { Text("Voice post-processing") },
+            supportingContent = {
+                Text(
+                    if (state.speechPostProcessing.enabled) {
+                        "Enabled for procedural, AI Simple, and AI Advanced"
+                    } else {
+                        "Configure emotion speed, pitch, loudness, tone, and pauses"
+                    },
+                )
+            },
+            modifier = Modifier.clickable(onClick = onShowSpeechPostProcessing),
+        )
         when (state.speechEngineMode) {
             SpeechEngineMode.PROCEDURAL -> ListItem(
                 headlineContent = { Text("Procedural voices") },
@@ -610,6 +636,184 @@ private fun SettingsScreen(
         onShowEngineDialog = { showEngineDialog = it },
         onSetSpeechEngineMode = onSetSpeechEngineMode,
     )
+}
+
+@Composable
+private fun SpeechPostProcessingScreen(
+    settings: SpeechPostProcessingSettings,
+    onBack: () -> Unit,
+    onSave: (SpeechPostProcessingSettings) -> Unit,
+) {
+    var draft by remember(settings) { mutableStateOf(settings) }
+    var expanded by remember { mutableStateOf<EmotionType?>(null) }
+    BackHandler(onBack = onBack)
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .height(58.dp)
+                .padding(horizontal = 8.dp),
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.SkipPrevious, contentDescription = "Back to settings")
+            }
+            Text("Voice post-processing", style = MaterialTheme.typography.titleLarge)
+        }
+        HorizontalDivider()
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            item {
+                ListItem(
+                    headlineContent = { Text("Post processing") },
+                    supportingContent = {
+                        Text("Applies emotion profiles to every voice engine when the character map provides an emotion.")
+                    },
+                    trailingContent = {
+                        Switch(
+                            checked = draft.enabled,
+                            onCheckedChange = { enabled ->
+                                draft = draft.copy(enabled = enabled)
+                                onSave(draft)
+                            },
+                        )
+                    },
+                )
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                ) {
+                    TextButton(
+                        onClick = {
+                            draft = draft.copy(profiles = defaultEmotionProcessingProfiles())
+                            onSave(draft)
+                        },
+                    ) { Text("Reset defaults") }
+                }
+                Text(
+                    "Procedural voices apply speed, pitch, quieter volume, and pauses. AI voices also apply warm/bright tone, loudness boost, and duration-preserving pitch processing to generated PCM.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                )
+                HorizontalDivider()
+            }
+            EmotionType.entries.forEach { type ->
+                item(key = type.name) {
+                    val profile = draft.profileFor(type)
+                    ListItem(
+                        headlineContent = { Text(emotionDisplayName(type)) },
+                        supportingContent = { Text(emotionProfileSummary(profile)) },
+                        trailingContent = {
+                            Icon(
+                                if (expanded == type) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                contentDescription = null,
+                            )
+                        },
+                        modifier = Modifier.clickable {
+                            expanded = if (expanded == type) null else type
+                        },
+                    )
+                    AnimatedVisibility(visible = expanded == type) {
+                        EmotionProfileControls(
+                            profile = profile,
+                            enabled = draft.enabled,
+                            onChange = { changed ->
+                                draft = draft.copy(profiles = draft.profiles + (type to changed.normalized()))
+                            },
+                            onCommit = { onSave(draft) },
+                        )
+                    }
+                    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+                }
+            }
+            item { Spacer(Modifier.height(32.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun EmotionProfileControls(
+    profile: EmotionProcessingProfile,
+    enabled: Boolean,
+    onChange: (EmotionProcessingProfile) -> Unit,
+    onCommit: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+    ) {
+        EmotionSlider("Speed", profile.speed, "${formatDecimal(profile.speed)}x", 0.7f..1.3f, enabled, { onChange(profile.copy(speed = it)) }, onCommit)
+        EmotionSlider("Pitch", profile.pitch, "${formatDecimal(profile.pitch)}x", 0.85f..1.15f, enabled, { onChange(profile.copy(pitch = it)) }, onCommit)
+        EmotionSlider("Loudness", profile.loudness, "${formatDecimal(profile.loudness)}x", 0.6f..1.4f, enabled, { onChange(profile.copy(loudness = it)) }, onCommit)
+        EmotionSlider(
+            "Tone",
+            profile.tone,
+            when {
+                profile.tone < -0.05f -> "Warm ${formatDecimal(-profile.tone)}"
+                profile.tone > 0.05f -> "Bright ${formatDecimal(profile.tone)}"
+                else -> "Neutral"
+            },
+            -1f..1f,
+            enabled,
+            { onChange(profile.copy(tone = it)) },
+            onCommit,
+        )
+        EmotionSlider(
+            "Pause after",
+            profile.pauseAfterMillis.toFloat(),
+            "${profile.pauseAfterMillis} ms",
+            0f..600f,
+            enabled,
+            { onChange(profile.copy(pauseAfterMillis = (it / 25f).roundToInt() * 25L)) },
+            onCommit,
+        )
+    }
+}
+
+@Composable
+private fun EmotionSlider(
+    label: String,
+    value: Float,
+    formattedValue: String,
+    range: ClosedFloatingPointRange<Float>,
+    enabled: Boolean,
+    onValueChange: (Float) -> Unit,
+    onValueChangeFinished: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(formattedValue, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+    }
+    Slider(
+        value = value.coerceIn(range.start, range.endInclusive),
+        onValueChange = onValueChange,
+        onValueChangeFinished = onValueChangeFinished,
+        valueRange = range,
+        enabled = enabled,
+    )
+}
+
+private fun emotionDisplayName(type: EmotionType): String =
+    type.name.lowercase().replaceFirstChar { it.titlecase() }
+
+private fun emotionProfileSummary(profile: EmotionProcessingProfile): String {
+    val tone = when {
+        profile.tone < -0.05f -> "warm"
+        profile.tone > 0.05f -> "bright"
+        else -> "neutral tone"
+    }
+    return "${formatDecimal(profile.speed)}x speed, ${formatDecimal(profile.pitch)}x pitch, $tone, ${profile.pauseAfterMillis} ms pause"
 }
 
 private fun chapterLabel(book: BookDocument, index: Int, start: Int): String {

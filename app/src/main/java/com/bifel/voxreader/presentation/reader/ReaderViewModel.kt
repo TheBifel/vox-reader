@@ -18,6 +18,7 @@ import com.bifel.voxreader.domain.model.ReaderOrientation
 import com.bifel.voxreader.domain.model.ReaderImageSize
 import com.bifel.voxreader.domain.model.ReaderImageAlignment
 import com.bifel.voxreader.domain.model.VoiceGroup
+import com.bifel.voxreader.domain.model.SpeechPostProcessingSettings
 import com.bifel.voxreader.domain.reader.ReadingHistory
 import com.bifel.voxreader.domain.repository.LibraryRepository
 import com.bifel.voxreader.domain.repository.SettingsRepository
@@ -111,6 +112,7 @@ class ReaderViewModel(
                         sleepGraceSeconds = settings.sleepGraceSeconds,
                         readingMode = settings.readingMode,
                         speechEngineMode = settings.speechEngineMode,
+                        speechPostProcessing = settings.speechPostProcessing,
                         playbackState = when {
                             !settings.speechControlsEnabled -> PlaybackState.DISABLED
                             it.playbackState == PlaybackState.DISABLED -> PlaybackState.PAUSED
@@ -287,6 +289,16 @@ class ReaderViewModel(
         pause()
         mutableUiState.update { it.copy(speechEngineMode = mode) }
         viewModelScope.launch { settingsRepository.setSpeechEngineMode(mode) }
+    }
+
+    fun setSpeechPostProcessing(settings: SpeechPostProcessingSettings) {
+        val restartIndex = mutableUiState.value.activePhraseIndex?.takeIf {
+            mutableUiState.value.playbackState == PlaybackState.PLAYING ||
+                mutableUiState.value.playbackState == PlaybackState.PREPARING
+        }
+        mutableUiState.update { it.copy(speechPostProcessing = settings) }
+        viewModelScope.launch { settingsRepository.setSpeechPostProcessing(settings) }
+        restartIndex?.let(::preparePhraseAndPlay)
     }
 
     fun downloadLocalVoice(id: String) {
@@ -801,7 +813,7 @@ class ReaderViewModel(
             state.characters.firstOrNull { it.id == phrase.speakerId } ?: NarratorProfile
         }
         val emotion = state.phraseEmotions[phrase.index]
-        val delivery = EmotionDelivery.from(emotion)
+        val delivery = EmotionDelivery.from(emotion, state.speechPostProcessing)
         val pitch = (profile.pitch * delivery.pitchMultiplier).coerceIn(0.5f, 1.6f)
         val speechRate = (
             profile.speechRate *
@@ -834,6 +846,9 @@ class ReaderViewModel(
                 proceduralVoiceId = profile.proceduralVoiceId,
                 localVoicePackId = profile.localVoicePackId,
                 advancedVoiceId = profile.advancedVoiceId,
+                postProcessingPitch = delivery.pitchMultiplier,
+                loudness = delivery.loudnessMultiplier,
+                tone = delivery.tone,
                 pauseAfterMillis = delivery.pauseAfterMillis,
             ),
             queueMode = queueMode,

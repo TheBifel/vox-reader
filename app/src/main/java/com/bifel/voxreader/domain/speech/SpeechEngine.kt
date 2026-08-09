@@ -28,6 +28,9 @@ data class SpeechRequest(
     val proceduralVoiceId: String? = null,
     val localVoicePackId: String? = null,
     val advancedVoiceId: String? = null,
+    val postProcessingPitch: Float = 1f,
+    val loudness: Float = 1f,
+    val tone: Float = 0f,
     val pauseAfterMillis: Long = 0L,
 )
 

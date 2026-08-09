@@ -73,6 +73,7 @@ data class ReaderSettings(
     val sleepGraceSeconds: Int = 30,
     val readingMode: ReadingMode = ReadingMode.PAGINATED,
     val speechEngineMode: SpeechEngineMode = SpeechEngineMode.PROCEDURAL,
+    val speechPostProcessing: SpeechPostProcessingSettings = SpeechPostProcessingSettings(),
 )
 
 enum class ReaderFontFamily { SERIF, SANS_SERIF, MONOSPACE }

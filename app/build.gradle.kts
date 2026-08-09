@@ -82,6 +82,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jsoup:jsoup:1.22.2")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("androidx.media3:media3-common:1.9.4")
     implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 
     debugImplementation("androidx.compose.ui:ui-tooling")

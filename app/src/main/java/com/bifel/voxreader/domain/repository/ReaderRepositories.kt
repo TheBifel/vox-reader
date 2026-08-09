@@ -11,6 +11,7 @@ import com.bifel.voxreader.domain.model.ReaderImageSize
 import com.bifel.voxreader.domain.model.ReaderImageAlignment
 import com.bifel.voxreader.domain.model.ReadingMode
 import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.domain.model.SpeechPostProcessingSettings
 import com.bifel.voxreader.domain.model.StoredBook
 import kotlinx.coroutines.flow.Flow
 
@@ -41,4 +42,5 @@ interface SettingsRepository {
     suspend fun setReaderColors(enabled: Boolean, background: Int, text: Int, link: Int, heading: Int, highlight: Int)
     suspend fun setSleepTimerSettings(checkMinutes: Int, graceSeconds: Int)
     suspend fun setSpeechEngineMode(mode: SpeechEngineMode)
+    suspend fun setSpeechPostProcessing(settings: SpeechPostProcessingSettings)
 }

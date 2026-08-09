@@ -22,6 +22,10 @@ import com.bifel.voxreader.domain.model.ReaderImageAlignment
 import com.bifel.voxreader.domain.model.ReadingMode
 import com.bifel.voxreader.domain.model.StoredBook
 import com.bifel.voxreader.domain.model.SpeechEngineMode
+import com.bifel.voxreader.domain.model.EmotionProcessingProfile
+import com.bifel.voxreader.domain.model.EmotionType
+import com.bifel.voxreader.domain.model.SpeechPostProcessingSettings
+import com.bifel.voxreader.domain.model.defaultEmotionProcessingProfiles
 import com.bifel.voxreader.domain.model.VoiceGroup
 import com.bifel.voxreader.domain.repository.LibraryRepository
 import com.bifel.voxreader.domain.repository.SettingsRepository
@@ -81,6 +85,7 @@ class ReaderDataStoreRepository(
             speechEngineMode = runCatching {
                 SpeechEngineMode.valueOf(preferences[Keys.SpeechEngineMode] ?: SpeechEngineMode.PROCEDURAL.name)
             }.getOrDefault(SpeechEngineMode.PROCEDURAL),
+            speechPostProcessing = decodeSpeechPostProcessing(preferences),
         )
     }
 
@@ -213,6 +218,58 @@ class ReaderDataStoreRepository(
         dataStore.edit { it[Keys.SpeechEngineMode] = mode.name }
     }
 
+    override suspend fun setSpeechPostProcessing(settings: SpeechPostProcessingSettings) {
+        val normalized = settings.profiles.mapValues { it.value.normalized() }
+        dataStore.edit {
+            it[Keys.SpeechPostProcessingEnabled] = settings.enabled
+            it[Keys.SpeechPostProcessingProfiles] = encodeSpeechPostProcessing(normalized)
+        }
+    }
+
+    private fun decodeSpeechPostProcessing(preferences: Preferences): SpeechPostProcessingSettings {
+        val defaults = defaultEmotionProcessingProfiles()
+        val stored = runCatching {
+            val json = JSONObject(preferences[Keys.SpeechPostProcessingProfiles] ?: "{}")
+            buildMap {
+                EmotionType.entries.forEach { type ->
+                    val value = json.optJSONObject(type.name) ?: return@forEach
+                    put(
+                        type,
+                        EmotionProcessingProfile(
+                            speed = value.optDouble("speed", defaults.getValue(type).speed.toDouble()).toFloat(),
+                            pitch = value.optDouble("pitch", defaults.getValue(type).pitch.toDouble()).toFloat(),
+                            loudness = value.optDouble("loudness", defaults.getValue(type).loudness.toDouble()).toFloat(),
+                            tone = value.optDouble("tone", defaults.getValue(type).tone.toDouble()).toFloat(),
+                            pauseAfterMillis = value.optLong("pauseAfterMillis", defaults.getValue(type).pauseAfterMillis),
+                        ).normalized(),
+                    )
+                }
+            }
+        }.getOrDefault(emptyMap())
+        return SpeechPostProcessingSettings(
+            enabled = preferences[Keys.SpeechPostProcessingEnabled] ?: false,
+            profiles = defaults + stored,
+        )
+    }
+
+    private fun encodeSpeechPostProcessing(
+        profiles: Map<EmotionType, EmotionProcessingProfile>,
+    ): String = JSONObject().apply {
+        EmotionType.entries.forEach { type ->
+            val profile = profiles[type] ?: return@forEach
+            put(
+                type.name,
+                JSONObject().apply {
+                    put("speed", profile.speed.toDouble())
+                    put("pitch", profile.pitch.toDouble())
+                    put("loudness", profile.loudness.toDouble())
+                    put("tone", profile.tone.toDouble())
+                    put("pauseAfterMillis", profile.pauseAfterMillis)
+                },
+            )
+        }
+    }.toString()
+
     private suspend fun updateBook(
         bookId: String,
         transform: (StoredBook) -> StoredBook,
@@ -343,6 +400,8 @@ class ReaderDataStoreRepository(
         val SleepGraceSeconds = intPreferencesKey("sleep_grace_seconds")
         val ReadingMode = stringPreferencesKey("reading_mode")
         val SpeechEngineMode = stringPreferencesKey("speech_engine_mode")
+        val SpeechPostProcessingEnabled = booleanPreferencesKey("speech_post_processing_enabled")
+        val SpeechPostProcessingProfiles = stringPreferencesKey("speech_post_processing_profiles")
         val LatestBookId = stringPreferencesKey("latest_book_id")
         val Books = stringPreferencesKey("books_json")
     }

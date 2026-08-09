@@ -78,7 +78,10 @@ internal class BufferedPcmSpeechPipeline(
             val startedAt = SystemClock.elapsedRealtime()
             val cached = synchronized(cache) { cache[key] }
             val audio = cached ?: runCatching {
-                synthesize(queued.request, queued::isCurrent)
+                NeuralPcmPostProcessor.process(
+                    synthesize(queued.request, queued::isCurrent),
+                    queued.request,
+                )
             }.getOrElse { error ->
                 if (queued.isCurrent()) {
                     events.emit(
@@ -200,6 +203,9 @@ internal class BufferedPcmSpeechPipeline(
         val proceduralVoiceId: String?,
         val localVoicePackId: String?,
         val advancedVoiceId: String?,
+        val postProcessingPitch: Float,
+        val loudness: Float,
+        val tone: Float,
     ) {
         companion object {
             fun from(request: SpeechRequest) = PcmCacheKey(
@@ -211,6 +217,9 @@ internal class BufferedPcmSpeechPipeline(
                 proceduralVoiceId = request.proceduralVoiceId,
                 localVoicePackId = request.localVoicePackId,
                 advancedVoiceId = request.advancedVoiceId,
+                postProcessingPitch = request.postProcessingPitch,
+                loudness = request.loudness,
+                tone = request.tone,
             )
         }
     }

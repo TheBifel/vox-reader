@@ -121,10 +121,12 @@ emotion types are `JOY`, `SADNESS`, `ANGER`, `FEAR`, `SURPRISE`, `DISGUST`, `TEN
 `EXCITEMENT`, `CURIOSITY`, `CONFIDENCE`, `AFFECTION`, `SHAME`, `GRIEF`, `AMUSEMENT`,
 `FRUSTRATION`, `RELIEF`, and `DETERMINATION`.
 
-The current Android TTS proof of concept applies audible delivery changes to `ANGER`, `SADNESS`,
-`EXCITEMENT`, and `FEAR`. It interpolates pitch, speaking rate, and the pause after the phrase
-using `intensity`; the remaining accepted types currently use neutral delivery. The emotion field
-is preserved in Room and when the analysis is exported again.
+Voice post-processing is optional and disabled by default. When enabled, every accepted emotion
+uses an editable profile containing speed, pitch, loudness, warm/bright tone, and the pause after
+the phrase. Each value is interpolated from neutral using `intensity`; emotion confidence below
+`0.85` is ignored defensively. Procedural Android voices apply the controls supported by the
+platform engine. Piper and Kitten voices additionally process generated PCM for tone, loudness,
+and duration-preserving pitch changes before it enters the playback cache.
 
 The current labeler may include an optional per-character `character_profile` in the top-level
 `characters` registry. VoxReader accepts this reviewer-only context, but it never overrides
