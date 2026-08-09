@@ -225,5 +225,3 @@ internal fun ReaderHeader(
     if (state.customReaderColors) Color(state.readerHeadingColor) else MaterialTheme.colorScheme.tertiary
 @Composable internal fun readerActiveHighlightColor(state: ReaderUiState): Color =
     if (state.customReaderColors) Color(state.readerHighlightColor) else MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
-
-

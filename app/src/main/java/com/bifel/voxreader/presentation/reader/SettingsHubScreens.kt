@@ -341,4 +341,3 @@ private fun emotionProfileSummary(profile: EmotionProcessingProfile): String {
     }
     return "${formatDecimal(profile.speed)}x speed, ${formatDecimal(profile.pitch)}x pitch, $tone, ${profile.pauseAfterMillis} ms pause"
 }
-

@@ -254,4 +254,3 @@ internal fun SleepTimerDialog(state: ReaderUiState, onDismiss: () -> Unit, onSav
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }
-

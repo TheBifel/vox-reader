@@ -362,5 +362,3 @@ internal fun renderPageText(text: String, page: PageLayout, paragraphSpacingSp: 
     visualToBook += raw.length
     return RenderedPageText(output.toString(), bookToVisual, visualToBook.toIntArray())
 }
-
-

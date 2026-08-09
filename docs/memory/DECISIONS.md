@@ -35,6 +35,12 @@ Avoid parsing/layout work for an entire book on every open. Render and paginate 
 
 Procedural Android TTS, Piper, and KittenTTS Micro implement a common speech contract. Voice mode is a reader control; engine selection and model management live in settings. Engine-specific UI may adapt after selection, but reading/navigation logic must not.
 
+## Reader application boundary
+
+The app remains one Gradle module with manual dependency composition. Framework-free application controllers own playback, book/analysis sessions, and navigation; `ReaderViewModel` adapts their flows to nested UI state. This keeps future speech engines and analysis providers replaceable without adding a DI framework or coupling Compose to data implementations.
+
+DataStore is the sole durable owner of user voice overrides. Imported Room analysis supplies discovered profiles and attribution; the session coordinator overlays the saved overrides when exposing characters.
+
 ## Emotion is optional and engine-independent
 
 Sidecar emotion is optional. A disabled-by-default post-processing layer maps controlled emotions to configurable delivery profiles. The same setting applies to procedural and neural engines, with best-effort differences documented rather than hidden.

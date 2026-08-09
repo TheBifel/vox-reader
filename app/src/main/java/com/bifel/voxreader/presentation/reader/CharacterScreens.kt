@@ -134,5 +134,3 @@ internal fun CharacterListDialog(
         confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
     )
 }
-
-

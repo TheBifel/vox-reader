@@ -269,4 +269,3 @@ internal fun BookImagesForRange(
         }
     }
 }
-

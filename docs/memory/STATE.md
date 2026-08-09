@@ -11,9 +11,10 @@ update_when: a checkpoint is committed, validation changes, blockers appear, or 
 
 - Branch: `main`
 - Remote: `origin` (`TheBifel/vox-reader`)
-- Latest product checkpoint at this review: `42294f0 feat: add configurable speech post-processing`
+- Latest architecture checkpoint: `39f02f7 refactor: modularize reader orchestration`
+- Latest product checkpoint before the refactor: `42294f0 feat: add configurable speech post-processing`
 - Previous stable advanced-speech checkpoint: `5a183e1 feat: stabilize buffered advanced TTS`
-- Unit tests passed immediately before the memory cleanup. Full test/lint/assemble validation must be rerun after cleanup.
+- Full unit tests, Android lint, and debug assembly pass at this checkpoint. The debug APK was installed on `emulator-5554`; launch, restored-book rendering, and playback start were smoke-tested without a crash.
 
 ## Working product
 
@@ -23,7 +24,6 @@ AI Advanced/Kitten with buffering performed well on the Samsung Galaxy S21. The 
 
 ## Known limitations
 
-- `ReaderScreen` and `ReaderViewModel` remain large integration points; see [TECH_DEBT.md](TECH_DEBT.md).
 - App import is the authoritative sidecar check; direct desktop EPUB segmentation can still differ.
 - Android TTS cannot reproduce every neural post-processing dimension exactly.
 - EPUB styling, complex images/tables, full footnote UX, library management, search, bookmarks, annotations, DRM, and whole-book analysis are incomplete or out of scope.
@@ -31,7 +31,7 @@ AI Advanced/Kitten with buffering performed well on the Samsung Galaxy S21. The 
 
 ## Next-work guidance
 
-Do not start a broad architecture rewrite. When the next feature would add responsibility to `ReaderViewModel` or `ReaderScreen`, first extract that feature's coherent coordinator/UI section. Deferred local overnight and opt-in cloud analysis remain documented in [../plans/WHOLE_BOOK_ANALYSIS.md](../plans/WHOLE_BOOK_ANALYSIS.md), not implemented.
+Preserve the application controllers and grouped UI boundaries. Future speech engines should enter through `SpeechEngineRegistry`/`VoiceCatalogRepository`; future analysis producers should enter through `SpeakerAnalysisRepository` and `ReaderSessionCoordinator`. Deferred local overnight and opt-in cloud analysis remain documented in [../plans/WHOLE_BOOK_ANALYSIS.md](../plans/WHOLE_BOOK_ANALYSIS.md), not implemented.
 
 ## Local-only fixtures
 

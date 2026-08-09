@@ -22,7 +22,9 @@ This file is the authoritative entry point for coding agents working in this rep
 
 ## Architecture guardrail
 
-`ReaderViewModel` and `ReaderScreen` are already large integration points. Before adding another responsibility to either, first extract the relevant coherent feature (for example playback coordination, analysis import, settings UI, or reader navigation). Do not perform a speculative rewrite; refactor when a concrete change would otherwise make either file larger or more coupled.
+Keep `ReaderViewModel` as the UI-state adapter for the application-layer reader controllers. Playback belongs in `ReaderPlaybackController`, book/analysis/voice-override workflow in `ReaderSessionCoordinator`, and history in `ReaderNavigationController`. Add speech implementations through `SpeechEngineRegistry` and model catalogs through `VoiceCatalogRepository`; do not branch reader behavior on concrete Piper, Kitten, or Android TTS classes.
+
+`ReaderScreen` is the route-level Compose owner. Keep feature UI in the existing reader content, chrome, appearance, settings, character, and voice files, and extend the grouped `ReaderActions` API instead of adding a new flat callback list. Archive/file I/O belongs behind repositories, never in composables.
 
 ## Verification
 
