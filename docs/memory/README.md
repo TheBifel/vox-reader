@@ -1,7 +1,7 @@
 ---
 memory_type: index
 authority: canonical
-last_verified: 2026-08-10
+last_verified: 2026-08-25
 update_when: memory files are added, renamed, or their ownership changes
 ---
 
@@ -17,6 +17,7 @@ This directory is the durable handoff between coding sessions. Code remains auth
 | Change code or architecture | [ARCHITECTURE.md](ARCHITECTURE.md), [DECISIONS.md](DECISIONS.md), [TECH_DEBT.md](TECH_DEBT.md) |
 | Build, test, install, or handle local assets | [WORKFLOW.md](WORKFLOW.md) |
 | Change speaker-map JSON | [../reference/SPEAKER_ANALYSIS_JSON.md](../reference/SPEAKER_ANALYSIS_JSON.md) and the book-labeling skill |
+| Plan or evaluate on-device AI for the Galaxy S21 | [../reference/GALAXY_S21_ON_DEVICE_AI.md](../reference/GALAXY_S21_ON_DEVICE_AI.md) |
 | Plan deferred whole-book analysis | [../plans/WHOLE_BOOK_ANALYSIS.md](../plans/WHOLE_BOOK_ANALYSIS.md) |
 
 ## Ownership

@@ -5,6 +5,7 @@ Start with [memory/README.md](memory/README.md). It routes agents and maintainer
 ## Current references
 
 - [Speaker-analysis JSON](reference/SPEAKER_ANALYSIS_JSON.md): app import contract and validation behavior.
+- [Samsung Galaxy S21 on-device AI observations](reference/GALAXY_S21_ON_DEVICE_AI.md): tested local inference capabilities, failures, and reusable mobile-AI lessons.
 - [Book-labeling skill](../skills/voxreader-label-book/SKILL.md): operational workflow for producing sidecars.
 
 ## Deferred plans
